@@ -1,0 +1,27 @@
+# HEL requirements (Raspberry Pi)
+#
+# Install with:
+#   pip install -r requirements.txt
+#
+# Notes:
+#   - tflite-runtime is much smaller than full tensorflow (~5 MB vs ~260 MB)
+#   - PyTorch CPU wheels for ARM64 are ~250 MB installed
+#   - Use tmux when installing — SSH disconnects can corrupt long installs
+#   - If memory errors during pip: add --no-cache-dir flag
+
+# TFLite for INT8 inference (replaces full tensorflow)
+tflite-runtime
+
+# PyTorch for the trainable adapter (CPU only)
+torch
+torchvision
+
+# Computer vision
+opencv-python-headless
+
+# Web server for GUI
+flask
+flask-sock
+
+# Numerics
+numpy

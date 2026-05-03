@@ -1,0 +1,5 @@
+logs/
+checkpoints/
+tflite_models/
+__pycache__/
+*.pyc

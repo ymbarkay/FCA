@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HEL Operator · Hybrid Edge Learning</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --surface2: #1a1a24;
+    --accent: #00e5ff;
+    --human: #ff6b35;
+    --good: #b4ff45;
+    --warn: #ffb800;
+    --danger: #ff3860;
+    --text: #e8e8f0;
+    --dim: #888aa0;
+    --border: rgba(255,255,255,0.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    padding: 20px;
+    min-height: 100vh;
+  }
+
+  /* Top banner showing current mode */
+  .mode-banner {
+    background: var(--surface);
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 20px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: border-color 0.2s;
+  }
+  .mode-banner.AUTOPILOT        { border-color: var(--accent); }
+  .mode-banner.TEACH            { border-color: var(--human); }
+  .mode-banner.REVERSE_MANUAL   { border-color: var(--warn); }
+  .mode-banner.PAUSED           { border-color: var(--dim); }
+  .mode-banner.DATASET_COLLECTION { border-color: var(--good); }
+
+  .mode-banner h1 {
+    font-size: 18px;
+    letter-spacing: 0.2em;
+    font-weight: 700;
+  }
+  .AUTOPILOT h1       { color: var(--accent); }
+  .TEACH h1           { color: var(--human); }
+  .REVERSE_MANUAL h1  { color: var(--warn); }
+  .PAUSED h1          { color: var(--dim); }
+  .DATASET_COLLECTION h1 { color: var(--good); }
+
+  .session-pill {
+    background: var(--surface2);
+    padding: 6px 14px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--dim);
+  }
+  .session-pill input {
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12px;
+    width: 140px;
+    margin-left: 8px;
+  }
+  .session-pill input:focus { outline: none; color: var(--accent); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 16px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+
+  /* Video */
+  .video-card img {
+    width: 100%;
+    display: block;
+    border-radius: 4px;
+    background: #000;
+  }
+
+  /* Steering bar */
+  .steering-section {
+    margin-top: 12px;
+  }
+  .steering-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--dim);
+    margin-bottom: 6px;
+  }
+  .steering-bar {
+    height: 28px;
+    background: var(--surface2);
+    border-radius: 4px;
+    position: relative;
+    overflow: hidden;
+  }
+  .steering-bar::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0; bottom: 0;
+    width: 1px;
+    background: rgba(255,255,255,0.2);
+  }
+  .steering-bar .base-fill,
+  .steering-bar .final-fill,
+  .steering-bar .selected-fill {
+    position: absolute;
+    top: 0; bottom: 0;
+    transition: all 0.05s linear;
+  }
+  .base-fill     { background: rgba(0, 229, 255, 0.3); }
+  .final-fill    { background: var(--accent); }
+  .selected-fill { background: var(--human); height: 14px; top: 7px; }
+
+  .steering-value {
+    text-align: center;
+    font-size: 11px;
+    margin-top: 4px;
+    color: var(--dim);
+  }
+
+  /* Telemetry */
+  h2 {
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin: 18px 0 10px 0;
+    font-weight: 500;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  h2:first-child { margin-top: 0; }
+
+  .stat {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 0;
+    font-size: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .stat:last-child { border-bottom: none; }
+  .stat .label { color: var(--dim); }
+  .stat .value {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat .value.warn { color: var(--warn); }
+  .stat .value.good { color: var(--good); }
+
+  /* Mode buttons */
+  .mode-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .mode-buttons button {
+    padding: 9px 6px;
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    transition: all 0.15s;
+  }
+  .mode-buttons button:hover { border-color: var(--accent); }
+  .mode-buttons button.active.MANUAL    { background: var(--dim); color: var(--bg); }
+  .mode-buttons button.active.AUTOPILOT { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .mode-buttons button.active.PAUSED    { background: var(--warn); color: var(--bg); border-color: var(--warn); }
+  .mode-buttons button.active.DATASET_COLLECTION { background: var(--good); color: var(--bg); border-color: var(--good); }
+
+  /* Action buttons */
+  .action-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .action-row button {
+    padding: 8px;
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+  }
+  .action-row button:hover { border-color: var(--human); }
+  .action-row .danger:hover { border-color: var(--danger); }
+
+  /* Key map help */
+  .keymap {
+    background: var(--surface2);
+    border-radius: 4px;
+    padding: 12px;
+    font-size: 11px;
+    color: var(--dim);
+    line-height: 1.7;
+    margin-top: 12px;
+  }
+  .keymap kbd {
+    background: var(--bg);
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 10px;
+    margin: 0 2px;
+  }
+  .keymap .row { padding: 2px 0; }
+
+  /* Connection indicator */
+  .conn-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--danger);
+    margin-right: 8px;
+    vertical-align: middle;
+    animation: pulse 2s infinite;
+  }
+  .conn-dot.ok { background: var(--good); }
+  @keyframes pulse { 50% { opacity: 0.4; } }
+
+  /* Selected angle dial — shown only in TEACH mode */
+  .dial-container {
+    text-align: center;
+    margin: 12px 0;
+    padding: 14px;
+    background: var(--surface2);
+    border-radius: 4px;
+    display: none;
+  }
+  .dial-container.show { display: block; }
+  .dial-container .label {
+    font-size: 10px;
+    color: var(--dim);
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    margin-bottom: 8px;
+  }
+  .dial-container .angle-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--human);
+    font-variant-numeric: tabular-nums;
+  }
+  .dial-container .angle-unit {
+    font-size: 14px;
+    color: var(--dim);
+    margin-left: 4px;
+  }
+  .dial-container .angle-norm {
+    font-size: 11px;
+    color: var(--dim);
+    margin-top: 4px;
+  }
+
+  /* Loss sparkline */
+  .loss-history {
+    height: 32px;
+    background: var(--surface2);
+    border-radius: 4px;
+    margin: 6px 0;
+    position: relative;
+    overflow: hidden;
+  }
+</style>
+</head>
+<body>
+
+<!-- MODE BANNER -->
+<div class="mode-banner PAUSED" id="modeBanner">
+  <div>
+    <span class="conn-dot" id="connDot"></span>
+    <h1 id="modeTitle" style="display: inline-block;">PAUSED</h1>
+  </div>
+  <div class="session-pill">
+    SESSION: <input type="text" id="sessionInput" value="default"
+                    onchange="setSession(this.value)">
+  </div>
+</div>
+
+<div class="grid">
+  <!-- LEFT COLUMN: Video + Steering -->
+  <div class="card video-card">
+    <img src="/video_feed" alt="camera">
+
+    <!-- Steering: shows base, final, and (in teach) selected -->
+    <div class="steering-section">
+      <div class="steering-label">
+        <span>← LEFT</span>
+        <span style="color: var(--accent);">model</span>
+        <span>RIGHT →</span>
+      </div>
+      <div class="steering-bar">
+        <div class="base-fill"  id="baseFill"></div>
+        <div class="final-fill" id="finalFill"></div>
+        <div class="selected-fill" id="selectedFill" style="display: none;"></div>
+      </div>
+      <div class="steering-value">
+        base <span id="baseAngleVal">90</span>° → 
+        final <span id="finalAngleVal" style="color: var(--accent);">90</span>°
+        (Δ <span id="deltaAngleVal">0.000</span>)
+      </div>
+    </div>
+
+    <!-- Selected angle dial (only visible in teach) -->
+    <div class="dial-container" id="dialContainer">
+      <div class="label">Selected angle</div>
+      <div>
+        <span class="angle-value" id="selectedAngleValue">90</span><span class="angle-unit">°</span>
+      </div>
+      <div class="angle-norm" id="selectedAngleNorm">norm: 0.500</div>
+    </div>
+  </div>
+
+  <!-- RIGHT COLUMN: Telemetry + Controls -->
+  <div class="card">
+    <h2>Mode</h2>
+    <div class="mode-buttons">
+      <button id="btn-PAUSED"    class="PAUSED"    onclick="setMode('PAUSED')">PAUSE</button>
+      <button id="btn-AUTOPILOT" class="AUTOPILOT" onclick="setMode('AUTOPILOT')">AUTO</button>
+      <button id="btn-TEACH"     class="TEACH"     onclick="setMode('TEACH')">TEACH</button>
+      <button id="btn-DATASET_COLLECTION" class="DATASET_COLLECTION" onclick="setMode('DATASET_COLLECTION')">DATASET</button>
+    </div>
+    <div class="action-row">
+      <button onclick="rewindAutopilot()">↶ REVERSE MODE (Q)</button>
+      <button onclick="markEvent()">★ MARK EVENT (M)</button>
+    </div>
+    <div class="action-row">
+      <button onclick="teachStopLabel()">🛑 TEACH STOP LABEL (X)</button>
+      <button disabled style="opacity:0.4; cursor:default;">TEACH ONLY</button>
+    </div>
+    <div class="action-row">
+      <button onclick="datasetStop()">⏸ DATASET STOP (Z)</button>
+      <button onclick="datasetResume()">▶ DATASET RESUME (V)</button>
+    </div>
+    <div class="action-row">
+      <button onclick="datasetCaptureStopFrame()">📸 CAPTURE STOP FRAME (C)</button>
+      <button disabled style="opacity:0.4; cursor:default;">DATASET ONLY</button>
+    </div>
+
+    <h2>Performance</h2>
+    <div class="stat"><span class="label">FPS</span>
+      <span class="value" id="fpsVal">0</span></div>
+    <div class="stat"><span class="label">Feature</span>
+      <span class="value" id="featureVal">0</span> <span class="label">ms</span></div>
+    <div class="stat"><span class="label">Inference</span>
+      <span class="value" id="inferenceVal">0</span> <span class="label">ms</span></div>
+    <div class="stat"><span class="label">Adapter</span>
+      <span class="value" id="adapterVal">0</span> <span class="label">ms</span></div>
+    <div class="stat"><span class="label">Loop total</span>
+      <span class="value" id="loopVal">0</span> <span class="label">ms</span></div>
+    <div class="stat"><span class="label">Other overhead</span>
+      <span class="value" id="otherVal">0</span> <span class="label">ms</span></div>
+
+    <h2>Learning</h2>
+    <div class="stat"><span class="label">Total updates</span>
+      <span class="value" id="updatesVal">0</span></div>
+    <div class="stat"><span class="label">Replay buffer</span>
+      <span class="value" id="bufferVal">0</span></div>
+    <div class="stat"><span class="label">Recent loss</span>
+      <span class="value" id="lossVal">—</span></div>
+    <div class="stat"><span class="label">Corrections</span>
+      <span class="value" id="correctionsVal">0</span></div>
+
+    <h2>Adapter</h2>
+    <div class="action-row">
+      <button onclick="saveCheckpoint()">💾 Save</button>
+      <button class="danger" onclick="resetAdapter()">↺ Reset weights</button>
+    </div>
+
+    <h2>Keys</h2>
+    <div class="keymap">
+      <div class="row"><strong style="color:var(--text);">TEACH MODE</strong></div>
+      <div class="row"><kbd>A</kbd>/<kbd>D</kbd> adjust angle  <kbd>S</kbd> centre</div>
+      <div class="row"><kbd>W</kbd> forward step  <kbd>⇧W</kbd> long step</div>
+      <div class="row"><kbd>X</kbd> stop label  <kbd>B</kbd> backward (no learn)</div>
+      <div class="row"><kbd>R</kbd> resume autopilot</div>
+      <div class="row" style="margin-top:6px;"><strong style="color:var(--text);">AUTOPILOT</strong></div>
+      <div class="row"><kbd>Q</kbd> reverse manual mode  <kbd>T</kbd> teach</div>
+      <div class="row" style="margin-top:6px;"><strong style="color:var(--text);">ALWAYS</strong></div>
+      <div class="row"><kbd>1</kbd> pause  <kbd>2</kbd> auto  <kbd>3</kbd> teach  <kbd>4</kbd> dataset</div>
+      <div class="row"><kbd>Space</kbd> emergency pause  <kbd>M</kbd> mark event</div>
+      <div class="row"><kbd>Z</kbd> dataset stop  <kbd>C</kbd> capture stop frame  <kbd>V</kbd> dataset resume</div>
+      <div class="row"><kbd>0</kbd> reset adapter  <kbd>P</kbd> save checkpoint</div>
+    </div>
+  </div>
+</div>
+
+<script>
+let ws = null;
+let reconnectTimer = null;
+let currentMode = 'PAUSED';
+let backwardHoldActive = false;
+
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+
+  ws.onopen = () => {
+    document.getElementById('connDot').classList.add('ok');
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  };
+
+  ws.onclose = () => {
+    document.getElementById('connDot').classList.remove('ok');
+    if (!reconnectTimer) {
+      reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 1500);
+    }
+  };
+
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    if (data.type === 'telemetry') updateTelemetry(data);
+  };
+}
+connect();
+
+function updateTelemetry(d) {
+  // Mode banner
+  const banner = document.getElementById('modeBanner');
+  banner.classList.remove('AUTOPILOT', 'TEACH', 'REVERSE_MANUAL', 'PAUSED', 'DATASET_COLLECTION');
+  banner.classList.add(d.mode);
+  document.getElementById('modeTitle').textContent = d.mode;
+  currentMode = d.mode;
+
+  // Highlight active mode button
+  ['PAUSED','AUTOPILOT','TEACH','DATASET_COLLECTION'].forEach(m => {
+    const btn = document.getElementById('btn-' + m);
+    if (btn) btn.classList.toggle('active', d.mode === m);
+  });
+
+  // Steering bars
+  const baseAngleNorm = d.base_angle_norm;            // [0,1], 0.5 = straight
+  const finalAngleCar = d.final_angle_car;
+  const finalAngleNorm = (finalAngleCar - 50) / 80;   // back to [0,1]
+  const selectedNorm = (d.selected_angle_car - 50) / 80;
+
+  setBar('baseFill',  baseAngleNorm);
+  setBar('finalFill', finalAngleNorm);
+  setBar('selectedFill', selectedNorm);
+
+  document.getElementById('baseAngleVal').textContent  = (baseAngleNorm*80+50).toFixed(0);
+  document.getElementById('finalAngleVal').textContent = finalAngleCar.toFixed(0);
+  document.getElementById('deltaAngleVal').textContent = d.delta_angle_norm.toFixed(3);
+
+  // Selected dial — show in teach-like steering modes
+  const dial = document.getElementById('dialContainer');
+  if (d.mode === 'TEACH' || d.mode === 'DATASET_COLLECTION' || d.mode === 'REVERSE_MANUAL') {
+    dial.classList.add('show');
+    document.getElementById('selectedFill').style.display = 'block';
+  } else {
+    dial.classList.remove('show');
+    document.getElementById('selectedFill').style.display = 'none';
+  }
+  document.getElementById('selectedAngleValue').textContent = d.selected_angle_car.toFixed(0);
+  document.getElementById('selectedAngleNorm').textContent = 'norm: ' + selectedNorm.toFixed(3);
+
+  // Performance
+  document.getElementById('fpsVal').textContent       = d.fps;
+  document.getElementById('featureVal').textContent   = d.feature_ms;
+  document.getElementById('inferenceVal').textContent = d.inference_ms;
+  document.getElementById('adapterVal').textContent   = d.adapter_ms;
+  document.getElementById('loopVal').textContent      = d.loop_ms;
+  document.getElementById('otherVal').textContent     = d.other_ms;
+
+  // Learning
+  document.getElementById('updatesVal').textContent     = d.total_updates;
+  document.getElementById('bufferVal').textContent      = d.replay_buffer_size;
+  document.getElementById('lossVal').textContent        = d.last_teach_loss > 0 ? d.last_teach_loss.toFixed(5) : '—';
+  document.getElementById('correctionsVal').textContent = d.corrections_logged;
+}
+
+function setBar(id, valNorm) {
+  // valNorm in [0, 1], 0.5 = centre. Convert to bar position.
+  const el = document.getElementById(id);
+  if (!el) return;
+  const offsetFromCentre = (valNorm - 0.5);          // [-0.5, 0.5]
+  const widthPct = Math.abs(offsetFromCentre) * 100; // [0, 50]%
+  el.style.width = widthPct + '%';
+  el.style.left = offsetFromCentre >= 0 ? '50%' : (50 - widthPct) + '%';
+}
+
+// ─── Commands ───────────────────────────────────────────────────────────
+function send(msg) {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+}
+
+function setMode(mode)         { send({ type: 'mode', value: mode }); }
+function setSession(label)     { send({ type: 'session', value: label }); }
+function rewindAutopilot()     { send({ type: 'rewind' }); }
+function saveCheckpoint()      { send({ type: 'save_checkpoint' }); }
+function resetAdapter() {
+  if (confirm('Reset adapter weights to zero? Replay buffer will be kept.'))
+    send({ type: 'reset_adapter' });
+}
+function datasetStop()             { send({ type: 'dataset_stop' }); }
+function datasetResume()           { send({ type: 'dataset_resume' }); }
+function datasetCaptureStopFrame() { send({ type: 'dataset_capture_stop_frame' }); }
+function teachStopLabel()          { send({ type: 'stop_teach' }); }
+function markEvent() {
+  const desc = prompt('Event description (optional):', '');
+  if (desc !== null) send({ type: 'event_marker', description: desc });
+}
+
+// ─── Keyboard handlers ──────────────────────────────────────────────────
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.repeat && !['a','A','d','D'].includes(e.key)) return;
+
+  // Always-on
+  if (e.key === ' ')          { setMode('PAUSED'); e.preventDefault(); return; }
+  if (e.key === '1')          { setMode('PAUSED'); return; }
+  if (e.key === '2')          { setMode('AUTOPILOT'); return; }
+  if (e.key === '3')          { setMode('TEACH'); return; }
+  if (e.key === '4')          { setMode('DATASET_COLLECTION'); return; }
+  if (e.key === 'q' || e.key === 'Q') { rewindAutopilot(); return; }
+  if (e.key === 'm' || e.key === 'M') { markEvent(); return; }
+  if (e.key === 'z' || e.key === 'Z') { datasetStop(); return; }
+  if (e.key === 'c' || e.key === 'C') { datasetCaptureStopFrame(); return; }
+  if (e.key === 'v' || e.key === 'V') { datasetResume(); return; }
+  if (e.key === '0')          { resetAdapter(); return; }
+  if (e.key === 'p' || e.key === 'P') { saveCheckpoint(); return; }
+
+  if (currentMode === 'AUTOPILOT') {
+    if (e.key === 't' || e.key === 'T') { setMode('TEACH');  return; }
+  }
+
+  if (currentMode === 'TEACH') {
+    if (e.key === 'a' || e.key === 'A') { send({ type: 'steer_left' });  return; }
+    if (e.key === 'd' || e.key === 'D') { send({ type: 'steer_right' }); return; }
+    if (e.key === 's' || e.key === 'S') { send({ type: 'centre' });      return; }
+    if (e.key === 'w' || e.key === 'W') {
+      if (e.shiftKey) send({ type: 'long_forward_step' });
+      else            send({ type: 'forward_step' });
+      e.preventDefault();
+      return;
+    }
+    if (e.key === 'x' || e.key === 'X') { send({ type: 'stop_teach' });  return; }
+    if (e.key === 'b' || e.key === 'B') {
+      if (!backwardHoldActive) {
+        send({ type: 'backward_hold_start' });
+        backwardHoldActive = true;
+      }
+      return;
+    }
+    if (e.key === 'r' || e.key === 'R') { setMode('AUTOPILOT');          return; }
+  }
+
+  if (currentMode === 'DATASET_COLLECTION') {
+    if (e.key === 'a' || e.key === 'A') { send({ type: 'steer_left' });  return; }
+    if (e.key === 'd' || e.key === 'D') { send({ type: 'steer_right' }); return; }
+    if (e.key === 's' || e.key === 'S') { send({ type: 'centre' });      return; }
+  }
+
+  if (currentMode === 'REVERSE_MANUAL') {
+    if (e.key === 'a' || e.key === 'A') { send({ type: 'steer_left' });  return; }
+    if (e.key === 'd' || e.key === 'D') { send({ type: 'steer_right' }); return; }
+    if (e.key === 's' || e.key === 'S') { send({ type: 'centre' });      return; }
+    if (e.key === 'b' || e.key === 'B') {
+      if (!backwardHoldActive) {
+        send({ type: 'backward_hold_start' });
+        backwardHoldActive = true;
+      }
+      return;
+    }
+    if (e.key === 'r' || e.key === 'R') { setMode('AUTOPILOT');          return; }
+  }
+});
+
+document.addEventListener('keyup', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+
+  if ((e.key === 'b' || e.key === 'B') && backwardHoldActive) {
+    send({ type: 'backward_hold_stop' });
+    backwardHoldActive = false;
+  }
+});
+</script>
+</body>
+</html>
