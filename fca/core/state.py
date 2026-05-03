@@ -1,5 +1,5 @@
 """
-hel/core/state.py — Shared state across all threads.
+fca/core/state.py — Shared state across all threads.
 
 Single source of truth for what the car is doing. Every thread reads/writes
 through this object, always under the lock.
@@ -24,7 +24,7 @@ ALL_MODES = (
 )
 
 
-class HELState:
+class FCAState:
     """Thread-safe shared state object."""
 
     def __init__(self):

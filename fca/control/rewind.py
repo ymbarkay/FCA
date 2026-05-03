@@ -1,5 +1,5 @@
 """
-hel/control/rewind.py — replay inverse commands at slow/controlled reverse speed.
+fca/control/rewind.py — replay inverse commands at slow/controlled reverse speed.
 
 Called when the human triggers rewind. Plays back the command buffer's inverse
 sequence. This is not mathematically exact rollback; it is a practical physical

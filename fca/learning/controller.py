@@ -1,5 +1,5 @@
 """
-hel/learning/controller.py
+fca/learning/controller.py
 
 Controller with two runtime paths:
   - scalar/none: legacy base-model + residual adapter path
@@ -13,8 +13,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from hel.perception.base_model import BaseModel
-from hel.learning.adapter_scalar import ScalarAdapter, ANGLE_DELTA_BOUND
+from fca.perception.base_model import BaseModel
+from fca.learning.adapter_scalar import ScalarAdapter, ANGLE_DELTA_BOUND
 
 
 SMOOTHING_BY_MODE = {
@@ -78,8 +78,8 @@ class AdaptiveController:
                     "Pass --feature-model tflite_models/feature_extractor_dense512_int8_edgetpu.tflite"
                 )
 
-            from hel.perception.feature_extractor import FeatureExtractor
-            from hel.learning.live_policy_head import LivePolicyHead
+            from fca.perception.feature_extractor import FeatureExtractor
+            from fca.learning.live_policy_head import LivePolicyHead
 
             self.feature_extractor = FeatureExtractor(
                 feature_model_path,
@@ -207,7 +207,7 @@ class AdaptiveController:
         }
 
     def _predict_deep_policy(self, image, mode):
-        from hel.learning.live_policy_head import angle_expected_value
+        from fca.learning.live_policy_head import angle_expected_value
 
         t0 = time.time()
         deep_features = self.feature_extractor.extract(image)

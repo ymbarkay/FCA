@@ -1,5 +1,5 @@
 """
-hel/learning/trainer.py — OPTIONAL background gradient step thread.
+fca/learning/trainer.py — OPTIONAL background gradient step thread.
 
 The background trainer now only updates while the runtime mode is TEACH.
 
@@ -14,7 +14,7 @@ TEACH mode.
 """
 import time
 
-from hel.core.state import MODE_TEACH
+from fca.core.state import MODE_TEACH
 
 
 # Defaults — tune these

@@ -1,5 +1,5 @@
 """
-hel/core/session_logger.py — Per-session CSV logging.
+fca/core/session_logger.py — Per-session CSV logging.
 
 Two files per session:
   - frames.csv         every frame's state
@@ -14,7 +14,7 @@ from datetime import datetime
 
 import cv2
 
-from hel.core.state import MODE_DATASET_COLLECTION
+from fca.core.state import MODE_DATASET_COLLECTION
 
 
 class SessionLogger:

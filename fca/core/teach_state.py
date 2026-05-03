@@ -1,5 +1,5 @@
 """
-hel/core/teach_state.py — Tracks the human's selected steering angle during teach mode.
+fca/core/teach_state.py — Tracks the human's selected steering angle during teach mode.
 
 Selection commands (A/D/S) adjust selected_angle without committing.
 Action commands (W/X) capture the current frame and commit selected_angle as

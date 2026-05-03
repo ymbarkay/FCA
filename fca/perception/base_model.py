@@ -1,5 +1,5 @@
 """
-hel/perception/base_model.py — Wraps the existing INT8/EdgeTPU TFLite MobileNetV2.
+fca/perception/base_model.py — Wraps the existing INT8/EdgeTPU TFLite MobileNetV2.
 
 Supports:
   - tflite_runtime first, TensorFlow fallback

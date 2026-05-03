@@ -1,5 +1,5 @@
 """
-hel/perception/model_split.py — Stage B preparation. RUN ON YOUR LAPTOP.
+fca/perception/model_split.py — Stage B preparation. RUN ON YOUR LAPTOP.
 
 PLACEHOLDER — TO BE IMPLEMENTED WHEN YOU'RE READY FOR STAGE B.
 
@@ -81,7 +81,7 @@ Implementation outline:
 ═══════════════════════════════════════════════════════════════════════════
 DEPLOY TO PI
 ═══════════════════════════════════════════════════════════════════════════
-    scp feature_extractor_int8.tflite pi@<ip>:~/hel/tflite_models/
+    scp feature_extractor_int8.tflite pi@<ip>:~/fca/tflite_models/
 
 ═══════════════════════════════════════════════════════════════════════════
 NEXT STEPS (PI-SIDE)

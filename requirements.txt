@@ -1,4 +1,4 @@
-# HEL requirements (Raspberry Pi)
+# FCA requirements (Raspberry Pi)
 #
 # Install with:
 #   pip install -r requirements.txt

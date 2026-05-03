@@ -1,5 +1,5 @@
 """
-hel/control/motors.py — PiCar-V motor abstraction.
+fca/control/motors.py — PiCar-V motor abstraction.
 
 Wraps the SunFounder picar library. Single point of contact between our
 software and the hardware. Handles graceful shutdown.

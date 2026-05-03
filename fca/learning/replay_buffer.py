@@ -1,5 +1,5 @@
 """
-hel/learning/replay_buffer.py — FIFO buffer of teaching samples.
+fca/learning/replay_buffer.py — FIFO buffer of teaching samples.
 
 Stores (input_features, target_delta_angle, target_speed_norm) tuples.
 The trainer thread samples small batches from this for gradient steps.

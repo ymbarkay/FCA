@@ -1,5 +1,5 @@
 """
-hel/gui/server.py — Flask + WebSocket server for the operator interface.
+fca/gui/server.py — Flask + WebSocket server for the operator interface.
 
 Serves:
   GET /            : the browser UI (templates/index.html)
@@ -14,7 +14,7 @@ import time
 from flask import Flask, Response, render_template
 from flask_sock import Sock
 
-from hel.core.state import (
+from fca.core.state import (
     MODE_AUTOPILOT,
     MODE_TEACH,
     MODE_REVERSE_MANUAL,

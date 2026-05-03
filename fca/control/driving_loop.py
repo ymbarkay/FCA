@@ -1,5 +1,5 @@
 """
-hel/control/driving_loop.py — main control thread.
+fca/control/driving_loop.py — main control thread.
 
 Implements the runtime mode state machine:
     AUTOPILOT → REWIND_TO_TEACH → TEACH → AUTOPILOT
@@ -18,7 +18,7 @@ from collections import deque
 import cv2
 import torch
 
-from hel.core.state import (
+from fca.core.state import (
     MODE_AUTOPILOT,
     MODE_TEACH,
     MODE_REVERSE_MANUAL,

@@ -1,5 +1,5 @@
 """
-hel/learning/adapter_scalar.py — Stage A: scalar-input adapter.
+fca/learning/adapter_scalar.py — Stage A: scalar-input adapter.
 
 Takes the base model's scalar outputs as input. Limited adaptation capability
 (can't truly distinguish visual environments) but lets us validate the entire

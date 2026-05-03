@@ -1,5 +1,5 @@
 """
-hel/core/command_buffer.py — Rolling history of executed commands for rewind.
+fca/core/command_buffer.py — Rolling history of executed commands for rewind.
 
 Stores (angle, speed, dt, timestamp) for the last N seconds. When the human
 triggers rewind, we replay the inverse: same steering angle, reversed throttle.

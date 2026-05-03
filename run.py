@@ -1,5 +1,5 @@
 """
-run.py — HEL entry point.
+run.py — FCA entry point.
 
 Wires every component together: state, controller, motors, driving loop,
 trainer thread, GUI server. Handles graceful shutdown.
@@ -34,21 +34,21 @@ import time
 # Make the package importable when running this script directly
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from hel.core.state import HELState, MODE_PAUSED
-from hel.core.command_buffer import CommandBuffer
-from hel.core.teach_state import TeachController
-from hel.core.session_logger import SessionLogger
-from hel.learning.controller import AdaptiveController
-from hel.learning.replay_buffer import ReplayBuffer
-from hel.learning.trainer import run_trainer
-from hel.control.motors import Motors
-from hel.control.driving_loop import DrivingLoop
-from hel.gui.server import create_app
+from fca.core.state import FCAState, MODE_PAUSED
+from fca.core.command_buffer import CommandBuffer
+from fca.core.teach_state import TeachController
+from fca.core.session_logger import SessionLogger
+from fca.learning.controller import AdaptiveController
+from fca.learning.replay_buffer import ReplayBuffer
+from fca.learning.trainer import run_trainer
+from fca.control.motors import Motors
+from fca.control.driving_loop import DrivingLoop
+from fca.gui.server import create_app
 
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="HEL — Hybrid Edge Learning operator interface"
+        description="FCA — Feedback-based Continual Adaptation operator interface"
     )
 
     # Runtime mode
@@ -251,7 +251,7 @@ def validate_args(args):
 
 def print_config(args):
     print("=" * 60)
-    print("  HEL — Hybrid Edge Learning")
+    print("  FCA — Feedback-based Continual Adaptation")
     print(f"  Adapter:        {args.adapter}")
     print(f"  Mode:           {args.mode}")
     print(f"  Base model:     {args.base_model}")
@@ -271,7 +271,7 @@ def main():
     print_config(args)
 
     # ─── Build components ─────────────────────────────────────────────────
-    state = HELState()
+    state = FCAState()
     command_buffer = CommandBuffer(max_seconds=3.0)
     teach_controller = TeachController()
     replay_buffer = ReplayBuffer(capacity=5000)
