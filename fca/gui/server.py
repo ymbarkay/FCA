@@ -71,6 +71,7 @@ def create_app(state, controller, driving_loop, teach_controller, replay_buffer)
                     payload = json.dumps({
                         "type": "telemetry",
                         **state.telemetry_snapshot(),
+                        **controller.checkpoint_status_snapshot(),
                     })
                     ws.send(payload)
                     time.sleep(0.1)
@@ -244,8 +245,14 @@ def _handle_command(msg, state, controller, driving_loop, teach_controller, repl
         print("[server] adapter reset")
 
     elif t == "save_checkpoint":
-        controller.save_checkpoint()
-        print("[server] checkpoint saved")
+        saved = controller.save_checkpoint(manual=True)
+        if saved:
+            exemplar_count = 0
+            if hasattr(driving_loop, "capture_validated_exemplars"):
+                exemplar_count = int(driving_loop.capture_validated_exemplars())
+            print(f"[server] checkpoint saved ({exemplar_count} validated exemplars)")
+        else:
+            print("[server] checkpoint save skipped")
 
     elif t == "clear_buffer":
         replay_buffer.clear()

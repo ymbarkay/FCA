@@ -419,8 +419,11 @@ def main():
 
     if controller.adapter is not None:
         try:
-            controller.save_checkpoint()
-            print("[run] final checkpoint saved")
+            saved = controller.save_checkpoint()
+            if saved:
+                print("[run] final checkpoint saved")
+            else:
+                print("[run] final checkpoint save skipped")
         except Exception as e:
             print(f"[run] checkpoint save failed: {e}")
 

@@ -23,6 +23,13 @@ When the human spots bad behaviour, they can:
 
 The TFLite feature extractor is never modified. Only the PyTorch policy head is.
 
+The current online-learning path combines mixed teach updates, multi-timescale
+rehearsal memory, EWC plus fixed-anchor consolidation, historical-gradient
+stabilization, and validated manual saves. A manual save marks a known-good
+state: it reinforces retention, refreshes the fixed anchor, snapshots a frozen
+validated exemplar bank for later rehearsal, and prevents background autosaves
+from silently overwriting that checkpoint.
+
 ## Project structure
 
 ```text
@@ -30,6 +37,7 @@ fca/
 ├── run.py                       Entry point
 ├── requirements.txt             Pi dependencies
 ├── README.md                    This file
+├── LICENSE                      MIT license
 ├── checkpoints/                 Adapter weights (auto-saved)
 ├── logs/                        Per-session CSVs + dataset captures
 ├── tflite_models/               Place your .tflite files here
@@ -170,6 +178,8 @@ Open `http://<pi-ip>:5000` from your laptop browser.
 7. Press W / Shift+W / X to commit labels and update the policy head.
 8. Press R to resume autopilot.
 9. Repeat as needed.
+10. Press `P` or click **Save** once behaviour is validated to lock in the
+    checkpoint and refresh the validated exemplar bank.
 
 ### Dataset collection mode
 
@@ -240,22 +250,60 @@ Pin these settings when reproducing results:
 - Teach update profile (`fca/control/driving_loop.py`):
   - `BOOST_STEPS_PER_COMMIT = 5`
   - `BOOST_LR_MULTIPLIER = 2.8`
+  - `BOOST_TARGET_REPEATS = 4`
+  - `BOOST_REHEARSAL_BATCH_SIZE = 14`
   - Boost cap in dynamic scaling: max 10 steps, max LR multiplier 4.5
+  - Drift-conditioned consolidation:
+    - `LONG_HORIZON_DRIFT_DECAY_START = 7.5e-4`
+    - `LONG_HORIZON_DRIFT_DECAY_END = 3.0e-3`
+    - `LONG_HORIZON_MIN_BOOST_SCALE = 0.45`
+    - `LONG_HORIZON_MAX_REHEARSAL_SCALE = 2.6`
 - Anti-forgetting profile (`fca/control/driving_loop.py`):
   - Hybrid rehearsal memory:
     - `REHEARSAL_RECENT_CAPACITY = 256`
-    - `REHEARSAL_PROTECTED_CAPACITY = 512`
-    - `REHEARSAL_PROTECTED_FRACTION = 0.60`
+    - `REHEARSAL_PROTECTED_CAPACITY = 768`
+    - `REHEARSAL_PROTECTED_FRACTION = 0.72`
+    - `REHEARSAL_ELDER_CAPACITY = 192`
+    - `REHEARSAL_ELDER_FRACTION = 0.24`
+    - `REHEARSAL_ELDER_UPDATE_STRIDE = 6`
+    - `VALIDATED_EXEMPLAR_CAPACITY = 192`
+    - `VALIDATED_EXEMPLAR_FRACTION = 0.18`
   - Rehearsal updates:
-    - `REHEARSAL_BATCH_SIZE = 16`
-    - `REHEARSAL_STEPS_PER_COMMIT = 3`
+    - `REHEARSAL_BATCH_SIZE = 20`
+    - `REHEARSAL_STEPS_PER_COMMIT = 4`
     - `REHEARSAL_LR_MULTIPLIER = 0.60`
+  - TEACH-only photometric augmentation:
+    - `ENABLE_TEACH_PHOTOMETRIC_AUGMENTATION = True`
+    - `TEACH_AUGMENT_PROB = 0.35`
 - EWC profile (`fca/learning/controller.py`):
   - `EWC_ENABLED = True`
   - `EWC_LAMBDA = 1.5e-3`
   - `EWC_FISHER_DECAY = 0.99`
-  - `EWC_THETA_MOMENTUM = 0.998`
   - `EWC_WARMUP_STEPS = 8`
+  - `FIXED_ANCHOR_ENABLED = True`
+  - `FIXED_ANCHOR_LAMBDA = 4e-4`
+  - `FIXED_ANCHOR_WARMUP_STEPS = 8`
+  - `HISTORICAL_GRADIENT_ENABLED = True`
+  - `HISTORICAL_GRADIENT_BLEND = 0.30`
+  - `HISTORICAL_GRADIENT_MOMENTUM = 0.90`
+  - Validated-save reinforcement:
+    - `VALIDATED_FISHER_BOOST = 0.02`
+    - `VALIDATED_STABLE_QUANTILE = 0.60`
+    - `VALIDATED_FISHER_MAX = 10.0`
+    - `VALIDATED_REINFORCEMENT_COUNT_GAIN = 0.15`
+    - `VALIDATED_REINFORCEMENT_MAX_MULT = 3.0`
+    - `VALIDATED_RETENTION_EWC_GAIN = 0.12`
+    - `VALIDATED_RETENTION_ANCHOR_GAIN = 0.16`
+    - `VALIDATED_RETENTION_MAX_MULT = 2.5`
+
+Validated-save behavior to preserve during reproduction:
+
+- Use the GUI Save button or `P` only when behaviour is confirmed good.
+- Manual save writes the checkpoint atomically and exposes status in the UI.
+- Once a manual save is taken, background autosaves are skipped so the
+  validated checkpoint is not silently replaced.
+- Session rehearsal memories reset on restart, but checkpoint weights and
+  `validated_save_count` persist across sessions.
 
 Recommended command template for this profile:
 
@@ -384,7 +432,7 @@ ALWAYS
   C            → capture one stop frame (any mode)
   V            → dataset resume motion
   0            → reset adapter/head
-  P            → save checkpoint
+  P            → save validated checkpoint
 
 AUTOPILOT mode
   Q            → enter REVERSE_MANUAL
@@ -437,3 +485,8 @@ or loop-side.
 
 **Car reverses but mostly makes noise** — increase `REVERSE_MANUAL_SPEED` in
 `fca/control/driving_loop.py`.
+
+## License
+
+This project is licensed under the MIT License. See `LICENSE`.
+

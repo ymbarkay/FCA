@@ -71,6 +71,10 @@ def run_trainer(
                 deltas,
                 speeds,
                 train_speed=True,
+                historical_blend=float(
+                    getattr(controller, "HISTORICAL_GRADIENT_BLEND", 0.0)
+                ),
+                update_historical=True,
             )
         except Exception as e:
             print(f"[trainer] gradient step failed: {e}")
@@ -84,14 +88,18 @@ def run_trainer(
 
         if updates_since_checkpoint >= checkpoint_every_n:
             try:
-                controller.save_checkpoint()
+                saved = controller.save_checkpoint()
+                if not saved:
+                    print("[trainer] checkpoint save skipped")
             except Exception as e:
                 print(f"[trainer] checkpoint save failed: {e}")
             updates_since_checkpoint = 0
 
     # On shutdown
     try:
-        controller.save_checkpoint()
+        saved = controller.save_checkpoint()
+        if not saved:
+            print("[trainer] final checkpoint save skipped")
     except Exception:
         pass
 

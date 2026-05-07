@@ -16,6 +16,7 @@ import random
 from collections import deque
 
 import cv2
+import numpy as np
 import torch
 
 from fca.core.state import (
@@ -50,11 +51,24 @@ ENABLE_AUTOPILOT_ANCHORS = False
 STORE_TEACH_CORRECTIONS_IN_REPLAY = False
 ENABLE_ANTI_FORGETTING_REHEARSAL = True
 REHEARSAL_RECENT_CAPACITY = 256
-REHEARSAL_PROTECTED_CAPACITY = 512
-REHEARSAL_PROTECTED_FRACTION = 0.60
-REHEARSAL_BATCH_SIZE = 16
-REHEARSAL_STEPS_PER_COMMIT = 3
+REHEARSAL_PROTECTED_CAPACITY = 768
+REHEARSAL_PROTECTED_FRACTION = 0.72
+REHEARSAL_ELDER_CAPACITY = 192
+REHEARSAL_ELDER_FRACTION = 0.24
+REHEARSAL_ELDER_UPDATE_STRIDE = 6
+REHEARSAL_BATCH_SIZE = 20
+REHEARSAL_STEPS_PER_COMMIT = 4
 REHEARSAL_LR_MULTIPLIER = 0.60
+BOOST_TARGET_REPEATS = 4
+BOOST_REHEARSAL_BATCH_SIZE = 14
+VALIDATED_EXEMPLAR_CAPACITY = 192
+VALIDATED_EXEMPLAR_FRACTION = 0.18
+LONG_HORIZON_DRIFT_DECAY_START = 7.5e-4
+LONG_HORIZON_DRIFT_DECAY_END = 3.0e-3
+LONG_HORIZON_MIN_BOOST_SCALE = 0.45
+LONG_HORIZON_MAX_REHEARSAL_SCALE = 2.6
+ENABLE_TEACH_PHOTOMETRIC_AUGMENTATION = True
+TEACH_AUGMENT_PROB = 0.35
 
 
 class DrivingLoop:
@@ -107,9 +121,16 @@ class DrivingLoop:
         # Hybrid rehearsal memory:
         # - recent: keeps latest corrections for fast adaptation
         # - protected: long-term representative memory via reservoir sampling
+        # - elder: much slower-timescale memory for very long-horizon retention
+        # - validated: frozen exemplar bank captured from known-good manual saves
         self._rehearsal_recent = deque(maxlen=REHEARSAL_RECENT_CAPACITY)
         self._rehearsal_protected = []
+        self._rehearsal_elder = []
+        self._rehearsal_validated = []
+        self._rehearsal_protected_bucket_counts = {}
+        self._rehearsal_elder_bucket_counts = {}
         self._rehearsal_seen = 0
+        self._rehearsal_elder_seen = 0
 
     # ─── Public API for GUI to inject commands ────────────────────────────
     def request_teach_command(self, command, **kwargs):
@@ -125,6 +146,22 @@ class DrivingLoop:
         """Request one stop-labeled dataset frame capture, regardless of mode."""
         with self._teach_lock:
             self._dataset_capture_global_pending = True
+
+    def capture_validated_exemplars(self, capacity=VALIDATED_EXEMPLAR_CAPACITY):
+        """Freeze a balanced exemplar bank from the current known-good rehearsal memory."""
+        capacity = int(max(0, capacity))
+        if capacity <= 0:
+            self._rehearsal_validated = []
+            return 0
+
+        source_pool = self._rehearsal_elder + self._rehearsal_protected + list(self._rehearsal_recent)
+        if not source_pool:
+            self._rehearsal_validated = []
+            return 0
+
+        snapshot = self._sample_bucket_balanced(source_pool, min(capacity, len(source_pool)))
+        self._rehearsal_validated = [self._clone_rehearsal_item(item) for item in snapshot]
+        return len(self._rehearsal_validated)
 
     def _consume_dataset_capture_stop_frame(self):
         with self._teach_lock:
@@ -575,7 +612,7 @@ class DrivingLoop:
         return last_loss
 
     def _boost_latest_target(self, target, n_steps=None, lr_multiplier=None):
-        """Run focused updates on the newest human-labelled target for faster local adaptation."""
+        """Run focused mixed updates so the newest correction does not overwrite older ones."""
         if target is None or self.controller.adapter is None:
             return 0.0
 
@@ -603,6 +640,10 @@ class DrivingLoop:
         batch_target_deltas = torch.tensor([[target_delta]], dtype=torch.float32)
         batch_target_speeds = torch.tensor([[target_speed]], dtype=torch.float32)
 
+        batch_features = batch_features.repeat(BOOST_TARGET_REPEATS, 1)
+        batch_target_deltas = batch_target_deltas.repeat(BOOST_TARGET_REPEATS, 1)
+        batch_target_speeds = batch_target_speeds.repeat(BOOST_TARGET_REPEATS, 1)
+
         last_loss = 0.0
         steps_done = 0
 
@@ -616,14 +657,43 @@ class DrivingLoop:
 
         try:
             for _ in range(n_steps):
+                rehearsal_batch = self._sample_rehearsal_items(BOOST_REHEARSAL_BATCH_SIZE)
+
+                step_features = batch_features
+                step_target_deltas = batch_target_deltas
+                step_target_speeds = batch_target_speeds
+
+                if rehearsal_batch:
+                    rehearsal_features = torch.stack([item[0] for item in rehearsal_batch], dim=0)
+                    rehearsal_deltas = torch.tensor(
+                        [item[1] for item in rehearsal_batch],
+                        dtype=torch.float32,
+                    ).unsqueeze(-1)
+                    rehearsal_speeds = torch.tensor(
+                        [item[2] for item in rehearsal_batch],
+                        dtype=torch.float32,
+                    ).unsqueeze(-1)
+
+                    step_features = torch.cat((step_features, rehearsal_features), dim=0)
+                    step_target_deltas = torch.cat((step_target_deltas, rehearsal_deltas), dim=0)
+                    step_target_speeds = torch.cat((step_target_speeds, rehearsal_speeds), dim=0)
+
                 try:
+                    historical_blend = 0.0
+                    if rehearsal_batch and getattr(self.controller, "HISTORICAL_GRADIENT_ENABLED", False):
+                        historical_blend = 0.5 * float(
+                            getattr(self.controller, "HISTORICAL_GRADIENT_BLEND", 0.0)
+                        )
+
                     last_loss = self.controller.gradient_step(
-                        batch_features,
-                        batch_target_deltas,
-                        batch_target_speeds,
-                        train_speed=False,
+                        step_features,
+                        step_target_deltas,
+                        step_target_speeds,
+                        train_speed=True,
                         delta_penalty_weight=0.0,
-                        clip_grad_norm=5.0,
+                        clip_grad_norm=1.0,
+                        historical_blend=historical_blend,
+                        update_historical=False,
                     )
                     steps_done += 1
                 except Exception as e:
@@ -657,11 +727,11 @@ class DrivingLoop:
         if f.ndim > 1:
             f = f.squeeze(0)
 
-        item = (
-            f,
-            float(target.get("target_delta_angle", 0.0)),
-            float(target.get("target_speed_norm", 0.0)),
-        )
+        delta = float(target.get("target_delta_angle", 0.0))
+        speed = float(target.get("target_speed_norm", 0.0))
+        bucket = self._correction_bucket(delta, speed)
+
+        item = (f, delta, speed, bucket)
 
         # Always keep recent corrections for local plasticity.
         self._rehearsal_recent.append(item)
@@ -671,10 +741,184 @@ class DrivingLoop:
 
         if len(self._rehearsal_protected) < REHEARSAL_PROTECTED_CAPACITY:
             self._rehearsal_protected.append(item)
+            self._bucket_inc(self._rehearsal_protected_bucket_counts, bucket)
         else:
-            j = random.randint(0, self._rehearsal_seen - 1)
-            if j < REHEARSAL_PROTECTED_CAPACITY:
-                self._rehearsal_protected[j] = item
+            replace_idx = self._pick_balanced_replace_index(
+                self._rehearsal_protected,
+                self._rehearsal_protected_bucket_counts,
+                bucket,
+            )
+            if replace_idx is None:
+                j = random.randint(0, self._rehearsal_seen - 1)
+                if j < REHEARSAL_PROTECTED_CAPACITY:
+                    replace_idx = j
+
+            if replace_idx is not None:
+                old_bucket = self._rehearsal_protected[replace_idx][3]
+                self._rehearsal_protected[replace_idx] = item
+                self._bucket_dec(self._rehearsal_protected_bucket_counts, old_bucket)
+                self._bucket_inc(self._rehearsal_protected_bucket_counts, bucket)
+
+        # A slower reservoir only sees periodic corrections, so very old cases
+        # remain replayable over much longer teaching horizons.
+        if (self._rehearsal_seen % REHEARSAL_ELDER_UPDATE_STRIDE) == 0:
+            self._rehearsal_elder_seen += 1
+            if len(self._rehearsal_elder) < REHEARSAL_ELDER_CAPACITY:
+                self._rehearsal_elder.append(item)
+                self._bucket_inc(self._rehearsal_elder_bucket_counts, bucket)
+            else:
+                replace_idx = self._pick_balanced_replace_index(
+                    self._rehearsal_elder,
+                    self._rehearsal_elder_bucket_counts,
+                    bucket,
+                )
+                if replace_idx is None:
+                    j = random.randint(0, self._rehearsal_elder_seen - 1)
+                    if j < REHEARSAL_ELDER_CAPACITY:
+                        replace_idx = j
+
+                if replace_idx is not None:
+                    old_bucket = self._rehearsal_elder[replace_idx][3]
+                    self._rehearsal_elder[replace_idx] = item
+                    self._bucket_dec(self._rehearsal_elder_bucket_counts, old_bucket)
+                    self._bucket_inc(self._rehearsal_elder_bucket_counts, bucket)
+
+    @staticmethod
+    def _bucket_inc(counts, bucket):
+        counts[bucket] = int(counts.get(bucket, 0)) + 1
+
+    @staticmethod
+    def _bucket_dec(counts, bucket):
+        cur = int(counts.get(bucket, 0)) - 1
+        if cur > 0:
+            counts[bucket] = cur
+        elif bucket in counts:
+            del counts[bucket]
+
+    @staticmethod
+    def _correction_bucket(delta, speed):
+        """Coarse bucket for diversity-preserving rehearsal memory."""
+        angle = float(max(0.0, min(1.0, delta)))
+        angle_bin = min(7, int(angle * 8.0))
+        speed_bin = 1 if float(speed) >= 0.5 else 0
+        return int(angle_bin * 2 + speed_bin)
+
+    def _pick_balanced_replace_index(self, pool, counts, incoming_bucket):
+        """Prefer replacing overrepresented buckets to keep long-term diversity."""
+        if not pool or not counts:
+            return None
+
+        incoming_count = int(counts.get(incoming_bucket, 0))
+        max_count = max(int(v) for v in counts.values())
+        if incoming_count + 1 >= max_count:
+            return None
+
+        candidate_buckets = [k for k, v in counts.items() if int(v) == max_count]
+        if not candidate_buckets:
+            return None
+
+        candidate_set = set(candidate_buckets)
+        candidate_indices = [i for i, item in enumerate(pool) if item[3] in candidate_set]
+        if not candidate_indices:
+            return None
+
+        return random.choice(candidate_indices)
+
+    @staticmethod
+    def _clone_rehearsal_item(item):
+        features, delta, speed, bucket = item
+        return features.detach().cpu().clone(), float(delta), float(speed), int(bucket)
+
+    def _sample_bucket_balanced(self, pool, sample_n):
+        """Round-robin buckets so frozen exemplars keep diverse corrections alive."""
+        if sample_n <= 0 or not pool:
+            return []
+
+        grouped = {}
+        for item in pool:
+            grouped.setdefault(item[3], []).append(item)
+
+        active_buckets = list(grouped.keys())
+        random.shuffle(active_buckets)
+        for bucket in active_buckets:
+            random.shuffle(grouped[bucket])
+
+        picked = []
+        while len(picked) < sample_n and active_buckets:
+            next_active = []
+            for bucket in active_buckets:
+                items = grouped.get(bucket)
+                if not items:
+                    continue
+
+                picked.append(items.pop())
+                if len(picked) >= sample_n:
+                    break
+                if items:
+                    next_active.append(bucket)
+
+            random.shuffle(next_active)
+            active_buckets = next_active
+
+        return picked
+
+    def _sample_rehearsal_items(self, batch_n):
+        """Sample a balanced rehearsal batch from recent and protected memories."""
+        recent_n = len(self._rehearsal_recent)
+        protected_n = len(self._rehearsal_protected)
+        elder_n = len(self._rehearsal_elder)
+        validated_n = len(self._rehearsal_validated)
+        total_n = recent_n + protected_n + elder_n + validated_n
+
+        if batch_n <= 0 or total_n <= 0:
+            return []
+
+        batch_n = min(batch_n, total_n)
+
+        target_validated = int(round(batch_n * VALIDATED_EXEMPLAR_FRACTION))
+        n_validated = min(target_validated, validated_n)
+        if validated_n > 0 and batch_n >= 4:
+            n_validated = max(1, n_validated)
+
+        remaining = batch_n - n_validated
+
+        target_elder = int(round(remaining * REHEARSAL_ELDER_FRACTION))
+        n_elder = min(target_elder, elder_n)
+
+        remaining_after_elder = remaining - n_elder
+        target_protected = int(round(remaining_after_elder * REHEARSAL_PROTECTED_FRACTION))
+        n_protected = min(target_protected, protected_n)
+        n_recent = min(remaining_after_elder - n_protected, recent_n)
+
+        remaining = batch_n - (n_validated + n_elder + n_protected + n_recent)
+        if remaining > 0:
+            extra_protected = min(remaining, max(0, protected_n - n_protected))
+            n_protected += extra_protected
+            remaining -= extra_protected
+        if remaining > 0:
+            extra_elder = min(remaining, max(0, elder_n - n_elder))
+            n_elder += extra_elder
+            remaining -= extra_elder
+        if remaining > 0:
+            extra_recent = min(remaining, max(0, recent_n - n_recent))
+            n_recent += extra_recent
+            remaining -= extra_recent
+        if remaining > 0:
+            extra_validated = min(remaining, max(0, validated_n - n_validated))
+            n_validated += extra_validated
+
+        batch = []
+        if n_validated > 0:
+            batch.extend(self._sample_bucket_balanced(self._rehearsal_validated, n_validated))
+        if n_elder > 0:
+            batch.extend(random.sample(self._rehearsal_elder, n_elder))
+        if n_protected > 0:
+            batch.extend(random.sample(self._rehearsal_protected, n_protected))
+        if n_recent > 0:
+            batch.extend(random.sample(list(self._rehearsal_recent), n_recent))
+
+        random.shuffle(batch)
+        return batch
 
     def _rehearsal_update(self, n_steps=REHEARSAL_STEPS_PER_COMMIT):
         """Rehearse a few older corrections to reduce catastrophic forgetting."""
@@ -686,7 +930,9 @@ class DrivingLoop:
 
         recent_n = len(self._rehearsal_recent)
         protected_n = len(self._rehearsal_protected)
-        total_n = recent_n + protected_n
+        elder_n = len(self._rehearsal_elder)
+        validated_n = len(self._rehearsal_validated)
+        total_n = recent_n + protected_n + elder_n + validated_n
 
         if total_n < max(4, REHEARSAL_BATCH_SIZE):
             return 0.0
@@ -705,26 +951,10 @@ class DrivingLoop:
         try:
             for _ in range(max(1, n_steps)):
                 batch_n = min(REHEARSAL_BATCH_SIZE, total_n)
+                batch = self._sample_rehearsal_items(batch_n)
 
-                target_protected = int(round(batch_n * REHEARSAL_PROTECTED_FRACTION))
-                n_protected = min(target_protected, protected_n)
-                n_recent = min(batch_n - n_protected, recent_n)
-
-                # Fill any deficit from whichever pool still has available samples.
-                remaining = batch_n - (n_protected + n_recent)
-                if remaining > 0:
-                    extra_recent = min(remaining, max(0, recent_n - n_recent))
-                    n_recent += extra_recent
-                    remaining -= extra_recent
-                if remaining > 0:
-                    extra_protected = min(remaining, max(0, protected_n - n_protected))
-                    n_protected += extra_protected
-
-                batch = []
-                if n_recent > 0:
-                    batch.extend(random.sample(list(self._rehearsal_recent), n_recent))
-                if n_protected > 0:
-                    batch.extend(random.sample(self._rehearsal_protected, n_protected))
+                if not batch:
+                    break
 
                 features = torch.stack([b[0] for b in batch], dim=0)
                 deltas = torch.tensor([b[1] for b in batch], dtype=torch.float32).unsqueeze(-1)
@@ -738,6 +968,10 @@ class DrivingLoop:
                         train_speed=True,
                         delta_penalty_weight=0.01,
                         clip_grad_norm=1.0,
+                        historical_blend=float(
+                            getattr(self.controller, "HISTORICAL_GRADIENT_BLEND", 0.0)
+                        ),
+                        update_historical=True,
                     )
                     steps_done += 1
                 except Exception as e:
@@ -770,9 +1004,86 @@ class DrivingLoop:
         lr_mult = min(4.5, self.BOOST_LR_MULTIPLIER * scale)
         return steps, lr_mult
 
+    def _compute_teach_update_profile(
+        self,
+        predicted_angle_car,
+        selected_angle_car,
+        predicted_speed_prob,
+        target_speed_norm,
+    ):
+        """Shift from plasticity to consolidation as checkpoint drift grows."""
+        boost_steps, boost_lr_mult = self._compute_teach_boost(
+            predicted_angle_car=predicted_angle_car,
+            selected_angle_car=selected_angle_car,
+            predicted_speed_prob=predicted_speed_prob,
+            target_speed_norm=target_speed_norm,
+        )
+
+        drift_rms = 0.0
+        if hasattr(self.controller, "checkpoint_drift_rms"):
+            try:
+                drift_rms = float(self.controller.checkpoint_drift_rms())
+            except Exception:
+                drift_rms = 0.0
+
+        start = LONG_HORIZON_DRIFT_DECAY_START
+        end = max(start * 1.01, LONG_HORIZON_DRIFT_DECAY_END)
+        if drift_rms <= start:
+            return boost_steps, boost_lr_mult, REHEARSAL_STEPS_PER_COMMIT
+
+        progress = (drift_rms - start) / float(end - start)
+        progress = max(0.0, min(1.0, progress))
+
+        boost_scale = 1.0 - progress * (1.0 - LONG_HORIZON_MIN_BOOST_SCALE)
+        rehearsal_scale = 1.0 + progress * (LONG_HORIZON_MAX_REHEARSAL_SCALE - 1.0)
+
+        boost_steps = max(2, int(round(boost_steps * boost_scale)))
+        boost_lr_mult = max(1.1, boost_lr_mult * boost_scale)
+
+        rehearsal_steps = int(round(REHEARSAL_STEPS_PER_COMMIT * rehearsal_scale))
+        rehearsal_steps = max(REHEARSAL_STEPS_PER_COMMIT, min(10, rehearsal_steps))
+
+        return boost_steps, boost_lr_mult, rehearsal_steps
+
+    def _maybe_augment_teach_frame(self, frame):
+        """Apply slight photometric-only perturbations to improve lighting robustness."""
+        if not ENABLE_TEACH_PHOTOMETRIC_AUGMENTATION:
+            return frame
+
+        if random.random() > TEACH_AUGMENT_PROB:
+            return frame
+
+        img = frame.astype(np.float32) / 255.0
+
+        # Mild exposure jitter.
+        gain = random.uniform(0.92, 1.08)
+        bias = random.uniform(-0.05, 0.05)
+        img = img * gain + bias
+
+        # Mild global contrast around per-channel mean.
+        if random.random() < 0.7:
+            contrast = random.uniform(0.92, 1.08)
+            mean = np.mean(img, axis=(0, 1), keepdims=True)
+            img = (img - mean) * contrast + mean
+
+        # Mild gamma perturbation for shading changes.
+        if random.random() < 0.6:
+            gamma = random.uniform(0.90, 1.10)
+            img = np.power(np.clip(img, 0.0, 1.0), gamma)
+
+        # Tiny sensor noise to reduce overfitting to exact pixels.
+        if random.random() < 0.25:
+            sigma = random.uniform(0.0, 0.01)
+            if sigma > 0:
+                img = img + np.random.normal(0.0, sigma, size=img.shape).astype(np.float32)
+
+        img = np.clip(img, 0.0, 1.0)
+        return (img * 255.0).astype(np.uint8)
+
     def _teach_forward_step(self, pred, frame, long=False):
         """Commit: capture frame, log target, gradient step, execute, stop."""
         selected_angle_car = self.teach_controller.get()
+        teach_image = self._maybe_augment_teach_frame(frame)
 
         # 1. Compute target and add to replay buffer
         target = self.controller.teach_step(
@@ -780,7 +1091,7 @@ class DrivingLoop:
             base_speed_prob=pred["base_speed_prob"],
             human_angle_car=selected_angle_car,
             human_speed_norm=1.0,
-            image=frame,
+            image=teach_image,
         )
 
         if target is not None and STORE_TEACH_CORRECTIONS_IN_REPLAY:
@@ -791,7 +1102,7 @@ class DrivingLoop:
             )
 
         # Strengthen immediate effect of this exact teaching event.
-        boost_steps, boost_lr_mult = self._compute_teach_boost(
+        boost_steps, boost_lr_mult, rehearsal_steps = self._compute_teach_update_profile(
             predicted_angle_car=pred["final_angle_car"],
             selected_angle_car=selected_angle_car,
             predicted_speed_prob=pred["base_speed_prob"],
@@ -800,7 +1111,7 @@ class DrivingLoop:
         loss = self._boost_latest_target(target, n_steps=boost_steps, lr_multiplier=boost_lr_mult)
 
         # Rehearse older teach corrections to preserve previously learned locations.
-        rehearsal_loss = self._rehearsal_update()
+        rehearsal_loss = self._rehearsal_update(n_steps=rehearsal_steps)
         if rehearsal_loss > 0:
             loss = rehearsal_loss
 
@@ -848,13 +1159,14 @@ class DrivingLoop:
     def _teach_stop_label(self, pred, frame):
         """Commit: log a 'should stop here' label, gradient step, stop."""
         selected_angle_car = self.teach_controller.get()
+        teach_image = self._maybe_augment_teach_frame(frame)
 
         target = self.controller.teach_step(
             base_angle_norm=pred["base_angle_norm"],
             base_speed_prob=pred["base_speed_prob"],
             human_angle_car=selected_angle_car,
             human_speed_norm=0.0,
-            image=frame,
+            image=teach_image,
         )
 
         if target is not None and STORE_TEACH_CORRECTIONS_IN_REPLAY:
@@ -865,7 +1177,7 @@ class DrivingLoop:
             )
 
         # Strengthen immediate effect of this exact teaching event.
-        boost_steps, boost_lr_mult = self._compute_teach_boost(
+        boost_steps, boost_lr_mult, rehearsal_steps = self._compute_teach_update_profile(
             predicted_angle_car=pred["final_angle_car"],
             selected_angle_car=selected_angle_car,
             predicted_speed_prob=pred["base_speed_prob"],
@@ -873,7 +1185,7 @@ class DrivingLoop:
         )
         loss = self._boost_latest_target(target, n_steps=boost_steps, lr_multiplier=boost_lr_mult)
 
-        rehearsal_loss = self._rehearsal_update()
+        rehearsal_loss = self._rehearsal_update(n_steps=rehearsal_steps)
         if rehearsal_loss > 0:
             loss = rehearsal_loss
 

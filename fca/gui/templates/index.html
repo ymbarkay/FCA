@@ -169,6 +169,22 @@
   }
   .stat .value.warn { color: var(--warn); }
   .stat .value.good { color: var(--good); }
+  .checkpoint-path {
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--dim);
+    line-height: 1.4;
+    word-break: break-all;
+  }
+  .checkpoint-path strong {
+    color: var(--text);
+    display: block;
+    margin-bottom: 4px;
+  }
 
   /* Mode buttons */
   .mode-buttons {
@@ -398,6 +414,12 @@
       <button onclick="saveCheckpoint()">💾 Save</button>
       <button class="danger" onclick="resetAdapter()">↺ Reset weights</button>
     </div>
+    <div class="stat"><span class="label">Last manual save</span>
+      <span class="value" id="checkpointSaveVal">Never</span></div>
+    <div class="checkpoint-path">
+      <strong>Checkpoint path</strong>
+      <span id="checkpointPathVal">—</span>
+    </div>
 
     <h2>Keys</h2>
     <div class="keymap">
@@ -498,6 +520,22 @@ function updateTelemetry(d) {
   document.getElementById('bufferVal').textContent      = d.replay_buffer_size;
   document.getElementById('lossVal').textContent        = d.last_teach_loss > 0 ? d.last_teach_loss.toFixed(5) : '—';
   document.getElementById('correctionsVal').textContent = d.corrections_logged;
+
+  // Checkpoint status
+  const saveEl = document.getElementById('checkpointSaveVal');
+  const pathEl = document.getElementById('checkpointPathVal');
+  pathEl.textContent = d.checkpoint_path || '—';
+
+  if (d.last_manual_checkpoint_saved_at) {
+    const savedAt = new Date(d.last_manual_checkpoint_saved_at * 1000);
+    let label = savedAt.toLocaleTimeString();
+    if (d.checkpoint_locked) label += ' (locked)';
+    saveEl.textContent = label;
+    saveEl.classList.toggle('good', true);
+  } else {
+    saveEl.textContent = d.checkpoint_locked ? 'Session locked' : 'Never';
+    saveEl.classList.toggle('good', false);
+  }
 }
 
 function setBar(id, valNorm) {
