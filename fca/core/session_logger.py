@@ -27,7 +27,7 @@ class SessionLogger:
         "human_active", "selected_angle_car",
         "dataset_angle_car", "dataset_speed_norm",
         "fps", "inference_ms", "adapter_ms",
-        "replay_buffer_size", "command_buffer_size",
+        "replay_buffer_size",
         "total_updates", "last_teach_loss",
         "frame_path",
     ]
@@ -171,7 +171,6 @@ class SessionLogger:
             f"{state_snapshot['inference_ms']:.3f}",
             f"{state_snapshot['adapter_ms']:.3f}",
             state_snapshot["replay_buffer_size"],
-            state_snapshot["command_buffer_size"],
             state_snapshot["total_updates"],
             f"{state_snapshot['last_teach_loss']:.6f}",
             frame_path,

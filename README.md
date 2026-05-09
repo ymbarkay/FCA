@@ -45,23 +45,19 @@ fca/
 └── fca/
     ├── core/
     │   ├── state.py             Shared mode + telemetry
-    │   ├── command_buffer.py    Legacy rewind history helper
     │   ├── teach_state.py       Selected angle controller
     │   └── session_logger.py    Per-session CSVs + dataset export
     ├── perception/
     │   ├── base_model.py        Legacy INT8 TFLite wrapper (scalar/none modes)
-    │   ├── feature_extractor.py EdgeTPU/CPU feature extractor wrapper
-    │   └── model_split.py       Feature pipeline prep utilities
+    │   └── feature_extractor.py EdgeTPU/CPU feature extractor wrapper
     ├── learning/
     │   ├── adapter_scalar.py    Legacy scalar residual adapter
-    │   ├── adapter_deep.py      Legacy deep residual adapter
-    │   ├── live_policy_head.py  Trainable PyTorch policy head
+    │   ├── live_policy_head.py  Trainable PyTorch MoE policy head (v4 intent routing)
     │   ├── controller.py        Inference + online update orchestration
     │   ├── replay_buffer.py     Replay buffer helper
     │   └── trainer.py           Optional background gradient step thread
     ├── control/
     │   ├── motors.py            PiCar wrapper
-    │   ├── rewind.py            Legacy inverse playback helper
     │   └── driving_loop.py      Main control thread
     └── gui/
         ├── server.py            Flask + WebSocket server
@@ -99,7 +95,7 @@ pip install -r requirements.txt
 # If pip runs out of memory: pip install -r requirements.txt --no-cache-dir
 ```
 
-### 4. Place your TFLite models
+### 4. Place your frozen models
 
 ```bash
 mkdir -p tflite_models
@@ -112,6 +108,14 @@ Optional for legacy scalar/base-only modes:
 cp /path/to/best_model_finetuned_int8_edgetpu.tflite tflite_models/
 ```
 
+Optional for frozen Keras autopilot models:
+
+```bash
+cp /path/to/frozen_driver.keras checkpoints/
+# or
+cp /path/to/frozen_driver.h5 checkpoints/
+```
+
 ### 5. Verify imports work
 
 ```bash
@@ -119,6 +123,9 @@ python3 -c "import tflite_runtime.interpreter; print('tflite OK')"
 python3 -c "import torch; print('torch', torch.__version__)"
 python3 -c "import picar; picar.setup(); print('picar OK')"
 ```
+
+If you want to run a frozen `.keras` / `.h5` model, TensorFlow must also be
+installed in that environment.
 
 ### 6. Run
 
@@ -140,6 +147,13 @@ python3 run.py --mode drive --adapter deep \
 # Real driving, base model only (no adapter, no learning)
 python3 run.py --mode drive --adapter none
 
+# Frozen Keras/H5 autopilot (no adapter, no online learning)
+python3 run.py --mode drive --adapter none \
+  --base-model checkpoints/frozen_driver.keras
+
+python3 run.py --mode drive --adapter none \
+  --base-model checkpoints/frozen_driver.h5
+
 # Legacy scalar residual adapter mode (requires base model file)
 python3 run.py --mode drive --adapter scalar \
   --base-model tflite_models/best_model_finetuned_int8_edgetpu.tflite
@@ -153,6 +167,20 @@ python3 run.py --mode drive --adapter deep --no-gui \
 commits (`W` / `Shift+W` / `X`) still perform immediate event-triggered updates.
 
 Open `http://<pi-ip>:5000` from your laptop browser.
+
+The GUI now includes a `Max auto speed` control that changes the runtime
+autopilot throttle limit without restarting the process.
+
+The GUI also includes an `Inference` selector that lets you switch AUTOPILOT
+between the main online model and a frozen model path at runtime. To switch
+back to the main online model, start the process with `--adapter deep` or
+`--adapter scalar`; if you start with `--adapter none`, only frozen-model
+inference is available.
+
+In online runs, the GUI `Adapter` section also lets you switch the active
+policy-head checkpoint by choosing from the available `.pt` files in the
+checkpoint directory. The newly selected head becomes the active online model
+and subsequent saves continue to write to that file.
 
 ## Usage workflow
 
@@ -223,12 +251,18 @@ Useful for compatibility testing and quick bring-up.
 Inference and online adaptation use 512-d visual features:
 
 - Feature extractor runs on TPU (`feature_extractor_dense512_int8_edgetpu.tflite`)
-- `LivePolicyHead` runs on CPU
-- TEACH updates train the head directly using angle-class CE + speed BCE
+- A Mixture-of-Experts policy head (v4 intent routing) runs on CPU
+  - Shared stem → 4 independent experts mixed by a learned gate
+  - Gate is conditioned on a predicted semantic intent (stop/left/straight/right)
+  - Loss: angle CE + speed BCE + intent CE + MoE load-balance + gate entropy
+- TEACH updates train the head directly; feature extractor is never modified
+- The GUI can switch AUTOPILOT between this online path and a frozen model path
+  at runtime
 
 ### `--adapter none`
 
-Runs frozen/base-only driving with no online learning.
+Runs frozen/base-only driving with no online learning. Supported frozen model
+formats are `.tflite`, `.keras`, and `.h5`.
 
 ## Reproducibility
 
@@ -242,7 +276,7 @@ Pin these settings when reproducing results:
 
 - Deep runtime path:
   - EdgeTPU feature extractor (`--adapter deep --feature-model ...`)
-  - CPU PyTorch live policy head updates
+  - CPU PyTorch MoE policy head updates (`4` experts on top of shared 512-d features)
 - Runtime/logging profile:
   - AUTOPILOT frame logging disabled
   - AUTOPILOT anchor insertion disabled

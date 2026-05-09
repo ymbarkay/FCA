@@ -51,6 +51,20 @@ class AdaptiveController:
     HISTORICAL_GRADIENT_ENABLED = True
     HISTORICAL_GRADIENT_BLEND = 0.30
     HISTORICAL_GRADIENT_MOMENTUM = 0.90
+    MOE_BALANCING_ENABLED = True
+    MOE_BALANCE_WARMUP_STEPS = 4
+    MOE_LOAD_BALANCE_WEIGHT = 0.03
+    MOE_GATE_ENTROPY_WEIGHT = 0.004
+    INTENT_ROUTING_ENABLED = True
+    INTENT_LOSS_WEIGHT = 0.22
+    INTENT_STOP_THRESHOLD = 0.5
+    INTENT_CENTER_MARGIN_NORM = 0.12
+    DEEP_ADAPTIVE_CLASS_WEIGHTING_ENABLED = False
+    DEEP_CLASS_STATS_MOMENTUM = 0.97
+    DEEP_CLASS_FREQ_GAIN = 0.55
+    DEEP_CLASS_HARDNESS_GAIN = 0.75
+    DEEP_CLASS_WEIGHT_MIN = 0.65
+    DEEP_CLASS_WEIGHT_MAX = 2.6
 
     def __init__(
         self,
@@ -58,7 +72,7 @@ class AdaptiveController:
         adapter_type="scalar",
         checkpoint_path=None,
         learning_rate=1e-3,
-        max_speed=,
+        max_speed=35,
         device="cpu",
         use_tpu=True,
         cpu_base_model_path=None,
@@ -70,8 +84,17 @@ class AdaptiveController:
         self.adapter_type = adapter_type
         self.feature_extractor = None
         self.base_model = None
+        self.use_tpu = use_tpu
+        self.cpu_base_model_path = cpu_base_model_path
+        self.num_threads = num_threads
+        self.feature_model_path = feature_model_path
+        self.initial_base_model_path = base_model_path
+        self.base_model_path = base_model_path
+        self.configured_frozen_model_path = str(base_model_path or "")
+        self.inference_backend = "main" if adapter_type != "none" else "frozen"
 
         self.checkpoint_path = checkpoint_path
+        self.checkpoint_dir = self._determine_checkpoint_dir(checkpoint_path)
         self.learning_rate = learning_rate
 
         if adapter_type == "scalar":
@@ -107,6 +130,7 @@ class AdaptiveController:
                 hidden1=256,
                 hidden2=128,
                 num_angle_classes=self.NUM_ANGLE_CLASSES,
+                num_experts=4,
             ).to(device)
 
             self.optimizer = torch.optim.AdamW(
@@ -144,6 +168,8 @@ class AdaptiveController:
         self._manual_checkpoint_locked = False
         self._last_manual_checkpoint_saved_at = None
         self._historical_grad_ema = {}
+        self._deep_class_count_ema = None
+        self._deep_class_loss_ema = None
 
         if self.adapter is not None:
             self._reset_ewc_state()
@@ -165,13 +191,165 @@ class AdaptiveController:
                 state = checkpoint
                 self._validated_save_count = 0
 
-            self.adapter.load_state_dict(state)
-            print(f"[controller] loaded adapter from {checkpoint_path}")
+            load_kind = self._load_adapter_state(state)
+            print(f"[controller] loaded adapter from {checkpoint_path} ({load_kind})")
             return True
 
         except Exception as e:
             print(f"[controller] WARN — could not load adapter: {e}")
             return False
+
+    def set_max_speed(self, max_speed):
+        with self.weights_lock:
+            self.max_speed = int(max(0, min(100, int(max_speed))))
+        print(f"[controller] max_speed -> {self.max_speed}")
+
+    def _determine_checkpoint_dir(self, checkpoint_path=None):
+        candidate = checkpoint_path if checkpoint_path is not None else self.checkpoint_path
+        if candidate:
+            directory = os.path.dirname(str(candidate))
+            if directory:
+                return directory
+        return "checkpoints"
+
+    def list_available_policy_heads(self):
+        directory = self._determine_checkpoint_dir()
+        if not os.path.isdir(directory):
+            return []
+
+        try:
+            names = [
+                entry.name
+                for entry in os.scandir(directory)
+                if entry.is_file() and entry.name.lower().endswith(".pt")
+            ]
+        except OSError:
+            return []
+
+        names.sort(key=str.lower)
+        return names
+
+    def switch_policy_head(self, checkpoint_name_or_path):
+        if self.adapter is None:
+            raise ValueError("No online model is available in this run.")
+
+        raw_path = str(checkpoint_name_or_path or "").strip()
+        if not raw_path:
+            raise ValueError("Policy head selection is required.")
+
+        if os.path.isabs(raw_path):
+            checkpoint_path = raw_path
+        else:
+            checkpoint_path = os.path.join(self._determine_checkpoint_dir(), raw_path)
+
+        checkpoint_path = os.path.abspath(checkpoint_path)
+        if not checkpoint_path.lower().endswith(".pt"):
+            raise ValueError("Policy head must be a .pt file.")
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(f"Policy head not found: {checkpoint_path}")
+
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        if isinstance(checkpoint, dict) and "model_state" in checkpoint:
+            state = checkpoint["model_state"]
+            validated_save_count = int(max(0, checkpoint.get("validated_save_count", 0)))
+        else:
+            state = checkpoint
+            validated_save_count = 0
+
+        with self.weights_lock:
+            load_kind = self._load_adapter_state(state)
+            self.adapter.eval()
+            self.checkpoint_path = checkpoint_path
+            self.checkpoint_dir = self._determine_checkpoint_dir(checkpoint_path)
+            self._validated_save_count = validated_save_count
+            self._manual_checkpoint_locked = False
+            self._last_manual_checkpoint_saved_at = None
+            self._smoothed_angle_car = None
+            self._last_mode_for_smoothing = None
+            self._reset_ewc_state()
+            self._reset_historical_grad_state()
+            if self.FIXED_ANCHOR_ENABLED:
+                self._refresh_fixed_anchor()
+            else:
+                self._fixed_anchor = {}
+                self._fixed_anchor_active = False
+
+        print(f"[controller] switched policy head -> {checkpoint_path} ({load_kind})")
+        return checkpoint_path
+
+    def _make_base_model(self, model_path):
+        model_path = str(model_path or "").strip()
+        if not model_path:
+            raise ValueError("Frozen model path is required.")
+
+        cpu_fallback = None
+        if (
+            str(model_path).lower().endswith(".tflite")
+            and self.cpu_base_model_path
+            and os.path.abspath(model_path) == os.path.abspath(self.initial_base_model_path)
+        ):
+            cpu_fallback = self.cpu_base_model_path
+
+        return BaseModel(
+            model_path,
+            use_tpu=self.use_tpu,
+            cpu_model_path=cpu_fallback,
+            num_threads=self.num_threads,
+        )
+
+    def set_inference_backend(self, backend, frozen_model_path=None):
+        backend = str(backend or "").strip().lower()
+        if backend not in {"main", "frozen"}:
+            raise ValueError(f"Unsupported inference backend: {backend}")
+
+        provided_path = str(frozen_model_path or "").strip()
+        if provided_path:
+            with self.weights_lock:
+                self.configured_frozen_model_path = provided_path
+
+        if backend == "main":
+            if self.adapter is None:
+                raise ValueError("Main online model is not available in this run.")
+
+            with self.weights_lock:
+                self.inference_backend = "main"
+                self._smoothed_angle_car = None
+            print("[controller] inference backend -> main")
+            return
+
+        model_path = str(
+            provided_path
+            or self.configured_frozen_model_path
+            or self.base_model_path
+            or ""
+        ).strip()
+        if not model_path:
+            raise ValueError("Frozen model path is required for frozen inference.")
+
+        reuse_existing = (
+            self.base_model is not None
+            and os.path.abspath(model_path) == os.path.abspath(self.base_model_path)
+        )
+        frozen_model = self.base_model if reuse_existing else self._make_base_model(model_path)
+
+        with self.weights_lock:
+            self.base_model = frozen_model
+            self.base_model_path = model_path
+            self.configured_frozen_model_path = model_path
+            self.inference_backend = "frozen"
+            self._smoothed_angle_car = None
+
+        print(f"[controller] inference backend -> frozen ({model_path})")
+
+    def set_frozen_model_path(self, frozen_model_path):
+        path = str(frozen_model_path or "").strip()
+        if not path:
+            raise ValueError("Frozen model path cannot be empty.")
+
+        with self.weights_lock:
+            self.configured_frozen_model_path = path
+
+        print(f"[controller] configured frozen model path -> {path}")
 
     @staticmethod
     def angle_norm_to_car(angle_norm):
@@ -234,6 +412,26 @@ class AdaptiveController:
             "feature_gate": 1.0,
         }
 
+    def _predict_frozen_model(self, image, mode):
+        if self.base_model is None:
+            raise RuntimeError("Frozen inference requested but no frozen model is loaded.")
+
+        _angle_probs, angle_norm, speed_prob = self.base_model.predict_raw(image)
+        final_angle_car = self.base_model.angle_norm_to_car(angle_norm)
+        final_speed_car = self.base_model.speed_prob_to_car(speed_prob, max_speed=self.max_speed)
+
+        return {
+            "base_angle_norm": float(angle_norm),
+            "base_speed_prob": float(speed_prob),
+            "delta_angle_norm": 0.0,
+            "delta_speed_logit": 0.0,
+            "final_angle_car": float(final_angle_car),
+            "final_speed_car": int(final_speed_car),
+            "feature_ms": 0.0,
+            "adapter_ms": 0.0,
+            "feature_gate": 0.0,
+        }
+
     def _predict_deep_policy(self, image, mode):
         from fca.learning.live_policy_head import angle_expected_value
 
@@ -272,7 +470,9 @@ class AdaptiveController:
     def predict(self, image, mode):
         t_start = time.time()
 
-        if self.adapter_type == "deep":
+        if self.inference_backend == "frozen":
+            out = self._predict_frozen_model(image, mode)
+        elif self.adapter_type == "deep":
             out = self._predict_deep_policy(image, mode)
         else:
             out = self._predict_scalar_or_none(image, mode)
@@ -373,12 +573,29 @@ class AdaptiveController:
                 batch_target_speeds = batch_target_speeds.unsqueeze(1)
 
             if self.adapter_type == "deep":
-                angle_logits, speed_logit = self.adapter(batch_features)
+                gate_probs = None
+                intent_logits = None
+                if hasattr(self.adapter, "forward_with_gate"):
+                    (
+                        angle_logits,
+                        speed_logit,
+                        gate_probs,
+                        intent_logits,
+                        _intent_probs,
+                    ) = self.adapter.forward_with_gate(batch_features)
+                else:
+                    angle_logits, speed_logit = self.adapter(batch_features)
 
                 angle_targets = torch.clamp(batch_target_deltas, 0.0, 1.0)
                 angle_class = torch.round(angle_targets * (self.NUM_ANGLE_CLASSES - 1)).long().squeeze(1)
+                angle_ce = F.cross_entropy(angle_logits, angle_class, reduction="none")
 
-                angle_loss = F.cross_entropy(angle_logits, angle_class)
+                if self.DEEP_ADAPTIVE_CLASS_WEIGHTING_ENABLED:
+                    class_weights = self._deep_angle_class_weights(angle_class, angle_ce.detach())
+                    sample_weights = class_weights[angle_class]
+                    angle_loss = torch.mean(angle_ce * sample_weights)
+                else:
+                    angle_loss = torch.mean(angle_ce)
 
                 if train_speed:
                     speed_loss = F.binary_cross_entropy_with_logits(speed_logit, batch_target_speeds)
@@ -386,6 +603,38 @@ class AdaptiveController:
                     speed_loss = torch.tensor(0.0, device=self.device)
 
                 loss = 2.0 * angle_loss + speed_loss
+
+                if self.INTENT_ROUTING_ENABLED and intent_logits is not None:
+                    intent_targets = self._derive_intent_targets(angle_targets, batch_target_speeds)
+                    intent_loss = F.cross_entropy(intent_logits, intent_targets)
+                    loss = loss + float(self.INTENT_LOSS_WEIGHT) * intent_loss
+
+                if (
+                    self.MOE_BALANCING_ENABLED
+                    and gate_probs is not None
+                    and self._ewc_steps >= self.MOE_BALANCE_WARMUP_STEPS
+                    and gate_probs.shape[-1] > 1
+                ):
+                    num_experts = gate_probs.shape[-1]
+                    mean_gate = torch.mean(gate_probs, dim=0)
+                    uniform = torch.full_like(mean_gate, 1.0 / float(num_experts))
+
+                    # Keep batch-level expert usage close to uniform.
+                    load_balance_loss = torch.mean((mean_gate - uniform) ** 2) * float(num_experts)
+
+                    # Prevent early single-expert collapse while still allowing specialization.
+                    gate_entropy = -torch.sum(
+                        gate_probs * torch.log(torch.clamp(gate_probs, 1e-8, 1.0)),
+                        dim=-1,
+                    ).mean()
+                    target_entropy = float(np.log(float(num_experts)))
+                    entropy_deficit = torch.clamp(target_entropy - gate_entropy, min=0.0)
+
+                    loss = (
+                        loss
+                        + float(self.MOE_LOAD_BALANCE_WEIGHT) * load_balance_loss
+                        + float(self.MOE_GATE_ENTROPY_WEIGHT) * entropy_deficit
+                    )
 
             else:
                 delta_angle, delta_speed_logit = self.adapter(batch_features)
@@ -446,6 +695,79 @@ class AdaptiveController:
 
         return float(loss.item())
 
+    def _ensure_deep_class_stats(self):
+        if self._deep_class_count_ema is None or self._deep_class_loss_ema is None:
+            self._deep_class_count_ema = torch.ones(
+                self.NUM_ANGLE_CLASSES,
+                dtype=torch.float32,
+                device=self.device,
+            )
+            self._deep_class_loss_ema = torch.ones(
+                self.NUM_ANGLE_CLASSES,
+                dtype=torch.float32,
+                device=self.device,
+            )
+
+    def _deep_angle_class_weights(self, angle_class, angle_ce_detached):
+        self._ensure_deep_class_stats()
+
+        momentum = float(np.clip(self.DEEP_CLASS_STATS_MOMENTUM, 0.0, 0.9999))
+
+        with torch.no_grad():
+            class_one_hot = F.one_hot(
+                angle_class,
+                num_classes=self.NUM_ANGLE_CLASSES,
+            ).float()
+
+            batch_count = class_one_hot.sum(dim=0)
+            batch_loss_sum = (class_one_hot * angle_ce_detached.unsqueeze(1)).sum(dim=0)
+            batch_loss_mean = batch_loss_sum / torch.clamp(batch_count, min=1.0)
+            seen_mask = batch_count > 0
+
+            self._deep_class_count_ema.mul_(momentum).add_(batch_count, alpha=(1.0 - momentum))
+            updated_loss = self._deep_class_loss_ema * momentum + batch_loss_mean * (1.0 - momentum)
+            self._deep_class_loss_ema = torch.where(seen_mask, updated_loss, self._deep_class_loss_ema)
+
+            class_freq = self._deep_class_count_ema / torch.clamp(
+                torch.sum(self._deep_class_count_ema),
+                min=1e-6,
+            )
+            inv_freq = 1.0 / torch.sqrt(torch.clamp(class_freq, min=1e-6))
+            inv_freq = inv_freq / torch.clamp(torch.mean(inv_freq), min=1e-6)
+
+            class_hardness = self._deep_class_loss_ema / torch.clamp(
+                torch.mean(self._deep_class_loss_ema),
+                min=1e-6,
+            )
+
+            weights = (
+                1.0
+                + float(self.DEEP_CLASS_FREQ_GAIN) * (inv_freq - 1.0)
+                + float(self.DEEP_CLASS_HARDNESS_GAIN) * (class_hardness - 1.0)
+            )
+
+            w_min = float(max(0.1, self.DEEP_CLASS_WEIGHT_MIN))
+            w_max = float(max(w_min, self.DEEP_CLASS_WEIGHT_MAX))
+            weights = torch.clamp(weights, min=w_min, max=w_max)
+            return weights.to(angle_ce_detached.device)
+
+    def _derive_intent_targets(self, angle_targets, speed_targets):
+        speed = speed_targets.squeeze(1)
+        angle = angle_targets.squeeze(1)
+
+        stop_thr = float(np.clip(self.INTENT_STOP_THRESHOLD, 0.0, 1.0))
+        margin = float(np.clip(self.INTENT_CENTER_MARGIN_NORM, 0.02, 0.35))
+
+        stop_mask = speed < stop_thr
+        left_mask = angle < (0.5 - margin)
+        right_mask = angle > (0.5 + margin)
+
+        intent = torch.full_like(speed, 2, dtype=torch.long)
+        intent = torch.where(left_mask, torch.ones_like(intent), intent)
+        intent = torch.where(right_mask, torch.full_like(intent, 3), intent)
+        intent = torch.where(stop_mask, torch.zeros_like(intent), intent)
+        return intent
+
     def save_checkpoint(self, manual=False):
         if self.adapter is None or self.checkpoint_path is None:
             return False
@@ -462,7 +784,11 @@ class AdaptiveController:
                     "model_state": self.adapter.state_dict(),
                     "feature_dim": 512,
                     "num_angle_classes": self.NUM_ANGLE_CLASSES,
-                    "architecture": "LivePolicyHead-512-256-128",
+                    "architecture": getattr(
+                        self.adapter,
+                        "architecture_name",
+                        "LivePolicyHead-512-256-128",
+                    ),
                     "validated_save_count": int(max(0, self._validated_save_count)),
                 }
             else:
@@ -491,12 +817,25 @@ class AdaptiveController:
         return True
 
     def checkpoint_status_snapshot(self):
+        checkpoint_path = self.checkpoint_path or ""
+        active_policy_head = os.path.basename(checkpoint_path) if checkpoint_path else ""
         with self.weights_lock:
             return {
                 "checkpoint_path": self.checkpoint_path or "",
+                "checkpoint_dir": str(self.checkpoint_dir or ""),
                 "checkpoint_locked": self._manual_checkpoint_locked,
                 "last_manual_checkpoint_saved_at": self._last_manual_checkpoint_saved_at,
                 "validated_save_count": int(max(0, self._validated_save_count)),
+                "max_speed": int(self.max_speed),
+                "adapter_type": str(self.adapter_type),
+                "active_policy_head": active_policy_head,
+                "available_policy_heads": self.list_available_policy_heads(),
+                "inference_backend": str(self.inference_backend),
+                "main_model_available": bool(self.adapter is not None),
+                "feature_model_path": str(self.feature_model_path or ""),
+                "frozen_model_path": str(self.base_model_path or ""),
+                "configured_frozen_model_path": str(self.configured_frozen_model_path or ""),
+                "frozen_model_backend": str(getattr(self.base_model, "backend_name", "")),
             }
 
     def checkpoint_drift_rms(self):
@@ -540,7 +879,7 @@ class AdaptiveController:
                     else:
                         state = checkpoint
 
-                    self.adapter.load_state_dict(state)
+                    self._load_adapter_state(state)
                     self.adapter.eval()
 
                 checkpoint_loaded = True
@@ -568,6 +907,16 @@ class AdaptiveController:
         self._reset_historical_grad_state()
 
         print("[controller] reset adapter by reinitializing parameters (no checkpoint)")
+
+    def _load_adapter_state(self, state):
+        if self.adapter is None:
+            return "none"
+
+        if hasattr(self.adapter, "load_compatible_state_dict"):
+            return str(self.adapter.load_compatible_state_dict(state))
+
+        self.adapter.load_state_dict(state)
+        return "native"
 
     @staticmethod
     def _sigmoid(x):

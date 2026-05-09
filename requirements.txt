@@ -12,6 +12,9 @@
 # TFLite for INT8 inference (replaces full tensorflow)
 tflite-runtime
 
+# Optional for frozen .keras/.h5 autopilot models:
+# tensorflow
+
 # PyTorch for the trainable adapter (CPU only)
 torch
 torchvision

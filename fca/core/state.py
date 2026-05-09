@@ -45,6 +45,7 @@ class FCAState:
         self.delta_speed_logit = 0.0
         self.final_angle_car = 90.0         # degrees, 50-130
         self.final_speed_car = 0.0          # 0 or 35
+        self.max_speed = 35
 
         # Teaching state
         self.selected_angle_car = 90.0      # degrees, what the human is selecting
@@ -53,7 +54,6 @@ class FCAState:
 
         # Buffer / counters
         self.replay_buffer_size = 0
-        self.command_buffer_size = 0
         self.corrections_logged = 0
 
         # Performance metrics
@@ -108,11 +108,11 @@ class FCAState:
                 'base_speed_prob': round(self.base_speed_prob, 4),
                 'delta_speed_logit': round(self.delta_speed_logit, 4),
                 'final_speed_car': round(self.final_speed_car, 1),
+                'max_speed': int(self.max_speed),
                 'selected_angle_car': round(self.selected_angle_car, 1),
                 'last_teach_loss': round(self.last_teach_loss, 6),
                 'total_updates': self.total_updates,
                 'replay_buffer_size': self.replay_buffer_size,
-                'command_buffer_size': self.command_buffer_size,
                 'corrections_logged': self.corrections_logged,
                 'human_active': self.human_active,
             }

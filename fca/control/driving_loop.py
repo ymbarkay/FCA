@@ -2,7 +2,7 @@
 fca/control/driving_loop.py — main control thread.
 
 Implements the runtime mode state machine:
-    AUTOPILOT → REWIND_TO_TEACH → TEACH → AUTOPILOT
+    AUTOPILOT → REVERSE_MANUAL → TEACH → AUTOPILOT
             \\
              → TEACH directly
              → PAUSED
@@ -46,7 +46,6 @@ REVERSE_MANUAL_KICK_SPEED = 35
 REVERSE_MANUAL_KICK_DURATION_S = 0.20
 TEACH_FORWARD_SPEED = 35
 DATASET_COLLECTION_FORWARD_SPEED = 26
-ENABLE_COMMAND_BUFFER = False
 ENABLE_AUTOPILOT_ANCHORS = False
 STORE_TEACH_CORRECTIONS_IN_REPLAY = False
 ENABLE_ANTI_FORGETTING_REHEARSAL = True
@@ -84,7 +83,6 @@ class DrivingLoop:
         state,
         controller,
         motors,
-        command_buffer,
         teach_controller,
         replay_buffer,
         session_logger,
@@ -93,7 +91,6 @@ class DrivingLoop:
         self.state = state
         self.controller = controller
         self.motors = motors
-        self.command_buffer = command_buffer
         self.teach_controller = teach_controller
         self.replay_buffer = replay_buffer
         self.session_logger = session_logger
@@ -271,10 +268,6 @@ class DrivingLoop:
                 self.state.adapter_ms = pred["adapter_ms"]
                 self.state.frames_processed += 1
                 self.state.replay_buffer_size = len(self.replay_buffer)
-                if ENABLE_COMMAND_BUFFER:
-                    self.state.command_buffer_size = len(self.command_buffer)
-                else:
-                    self.state.command_buffer_size = 0
                 self.state.selected_angle_car = self.teach_controller.get()
 
             dataset_capture_frame = False
@@ -363,8 +356,6 @@ class DrivingLoop:
         speed = pred["final_speed_car"]
 
         self.motors.drive(angle, speed)
-        if ENABLE_COMMAND_BUFFER:
-            self.command_buffer.add(angle, speed)
         if ENABLE_AUTOPILOT_ANCHORS:
             self._maybe_add_anchor_sample(pred, frame)
 

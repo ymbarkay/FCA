@@ -15,6 +15,16 @@ Edge TPU base examples:
     python3 run.py --mode test --adapter scalar \
       --base-model tflite_models/best_model_finetuned_int8_edgetpu.tflite
 
+Frozen model examples:
+        python3 run.py --mode drive --adapter none \
+            --base-model tflite_models/best_model_finetuned_int8_edgetpu.tflite
+
+        python3 run.py --mode drive --adapter none \
+            --base-model checkpoints/frozen_driver.keras
+
+        python3 run.py --mode drive --adapter none \
+            --base-model checkpoints/frozen_driver.h5
+
 Deep adapter example:
     python3 run.py --mode test --adapter deep \
       --base-model tflite_models/best_model_finetuned_int8_edgetpu.tflite \
@@ -35,7 +45,6 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fca.core.state import FCAState, MODE_PAUSED
-from fca.core.command_buffer import CommandBuffer
 from fca.core.teach_state import TeachController
 from fca.core.session_logger import SessionLogger
 from fca.learning.controller import AdaptiveController
@@ -67,19 +76,22 @@ def parse_args():
         help="Stage A: scalar | Stage B: deep | none = base model only",
     )
 
-    # Base TFLite model
+    # Base / frozen model
     p.add_argument(
         "--base-model",
         default="tflite_models/best_model_finetuned_int8.tflite",
-        help="Path to the INT8/EdgeTPU TFLite base model",
+        help=(
+            "Path to the frozen autopilot model. Supported formats: "
+            ".tflite, .keras, .h5"
+        ),
     )
 
     p.add_argument(
         "--cpu-base-model",
         default=None,
         help=(
-            "Optional non-compiled INT8 model for CPU fallback. "
-            "Use this when --base-model points to an EdgeTPU-compiled model."
+            "Optional non-compiled INT8 .tflite model for CPU fallback. "
+            "Use this when --base-model points to an EdgeTPU-compiled TFLite model."
         ),
     )
 
@@ -272,7 +284,8 @@ def main():
 
     # ─── Build components ─────────────────────────────────────────────────
     state = FCAState()
-    command_buffer = CommandBuffer(max_seconds=3.0)
+    with state.lock:
+        state.max_speed = int(args.max_speed)
     teach_controller = TeachController()
     replay_buffer = ReplayBuffer(capacity=5000)
     session_logger = SessionLogger(log_dir="logs")
@@ -322,7 +335,6 @@ def main():
         state=state,
         controller=controller,
         motors=motors,
-        command_buffer=command_buffer,
         teach_controller=teach_controller,
         replay_buffer=replay_buffer,
         session_logger=session_logger,

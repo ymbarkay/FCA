@@ -6,62 +6,89 @@
 <title>FCA Operator · Feedback-based Continual Adaptation</title>
 <style>
   :root {
-    --bg: #0a0a0f;
-    --surface: #111118;
-    --surface2: #1a1a24;
-    --accent: #00e5ff;
-    --human: #ff6b35;
-    --good: #b4ff45;
-    --warn: #ffb800;
-    --danger: #ff3860;
-    --text: #e8e8f0;
-    --dim: #888aa0;
-    --border: rgba(255,255,255,0.08);
+    --bg: #efe6d8;
+    --surface: rgba(255, 250, 242, 0.96);
+    --surface2: #eadfce;
+    --accent: #2f6a5d;
+    --human: #b85c38;
+    --good: #4f7b40;
+    --warn: #b67a2a;
+    --danger: #b04444;
+    --text: #1f2a24;
+    --dim: #6d756d;
+    --border: rgba(55, 73, 64, 0.18);
+    --shadow: 0 18px 40px rgba(80, 61, 42, 0.10);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    background: var(--bg);
+    background:
+      radial-gradient(circle at 0% 0%, rgba(47, 106, 93, 0.08), transparent 30%),
+      radial-gradient(circle at 100% 0%, rgba(184, 92, 56, 0.09), transparent 34%),
+      linear-gradient(180deg, #f6efe5 0%, #eadfce 100%),
+      var(--bg);
     color: var(--text);
-    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-family: "Aptos", "Segoe UI Variable", "Trebuchet MS", sans-serif;
     padding: 20px;
     min-height: 100vh;
   }
 
-  /* Top banner showing current mode */
   .mode-banner {
-    background: var(--surface);
-    border: 2px solid var(--border);
-    border-radius: 8px;
-    padding: 14px 20px;
+    background: linear-gradient(180deg, rgba(255, 250, 242, 0.98), rgba(248, 241, 231, 0.98));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 18px 20px;
     margin-bottom: 16px;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
+    gap: 16px;
     transition: border-color 0.2s;
+    box-shadow: var(--shadow);
   }
-  .mode-banner.AUTOPILOT        { border-color: var(--accent); }
-  .mode-banner.TEACH            { border-color: var(--human); }
-  .mode-banner.REVERSE_MANUAL   { border-color: var(--warn); }
-  .mode-banner.PAUSED           { border-color: var(--dim); }
+  .mode-banner.AUTOPILOT { border-color: var(--accent); }
+  .mode-banner.TEACH { border-color: var(--human); }
+  .mode-banner.REVERSE_MANUAL { border-color: var(--warn); }
+  .mode-banner.PAUSED { border-color: var(--dim); }
   .mode-banner.DATASET_COLLECTION { border-color: var(--good); }
 
+  .banner-main {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .banner-runtime-row {
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .banner-tools {
+    display: flex;
+    align-items: flex-start;
+  }
+
   .mode-banner h1 {
-    font-size: 18px;
-    letter-spacing: 0.2em;
+    font-size: 22px;
+    letter-spacing: 0.14em;
     font-weight: 700;
   }
-  .AUTOPILOT h1       { color: var(--accent); }
-  .TEACH h1           { color: var(--human); }
-  .REVERSE_MANUAL h1  { color: var(--warn); }
-  .PAUSED h1          { color: var(--dim); }
+  .AUTOPILOT h1 { color: var(--accent); }
+  .TEACH h1 { color: var(--human); }
+  .REVERSE_MANUAL h1 { color: var(--warn); }
+  .PAUSED h1 { color: var(--dim); }
   .DATASET_COLLECTION h1 { color: var(--good); }
 
   .session-pill {
-    background: var(--surface2);
-    padding: 6px 14px;
-    border-radius: 4px;
+    background: rgba(234, 223, 206, 0.92);
+    padding: 10px 14px;
+    border-radius: 12px;
     font-size: 12px;
     color: var(--dim);
+    border: 1px solid var(--border);
   }
   .session-pill input {
     background: transparent;
@@ -83,21 +110,21 @@
   }
 
   .card {
-    background: var(--surface);
+    background: linear-gradient(180deg, rgba(255, 251, 244, 0.98), rgba(248, 242, 234, 0.98));
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 16px;
     padding: 16px;
+    box-shadow: var(--shadow);
   }
 
-  /* Video */
   .video-card img {
     width: 100%;
     display: block;
-    border-radius: 4px;
+    border-radius: 12px;
     background: #000;
+    border: 1px solid rgba(47, 106, 93, 0.28);
   }
 
-  /* Steering bar */
   .steering-section {
     margin-top: 12px;
   }
@@ -111,7 +138,7 @@
   .steering-bar {
     height: 28px;
     background: var(--surface2);
-    border-radius: 4px;
+    border-radius: 999px;
     position: relative;
     overflow: hidden;
   }
@@ -119,19 +146,21 @@
     content: '';
     position: absolute;
     left: 50%;
-    top: 0; bottom: 0;
+    top: 0;
+    bottom: 0;
     width: 1px;
-    background: rgba(255,255,255,0.2);
+    background: rgba(31, 42, 36, 0.16);
   }
   .steering-bar .base-fill,
   .steering-bar .final-fill,
   .steering-bar .selected-fill {
     position: absolute;
-    top: 0; bottom: 0;
+    top: 0;
+    bottom: 0;
     transition: all 0.05s linear;
   }
-  .base-fill     { background: rgba(0, 229, 255, 0.3); }
-  .final-fill    { background: var(--accent); }
+  .base-fill { background: rgba(47, 106, 93, 0.24); }
+  .final-fill { background: var(--accent); }
   .selected-fill { background: var(--human); height: 14px; top: 7px; }
 
   .steering-value {
@@ -141,14 +170,13 @@
     color: var(--dim);
   }
 
-  /* Telemetry */
   h2 {
     font-size: 10px;
-    letter-spacing: 0.2em;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--dim);
     margin: 18px 0 10px 0;
-    font-weight: 500;
+    font-weight: 600;
     padding-bottom: 4px;
     border-bottom: 1px solid var(--border);
   }
@@ -169,12 +197,13 @@
   }
   .stat .value.warn { color: var(--warn); }
   .stat .value.good { color: var(--good); }
+
   .checkpoint-path {
     margin-top: 6px;
     padding: 8px 10px;
     background: var(--surface2);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 10px;
     font-size: 11px;
     color: var(--dim);
     line-height: 1.4;
@@ -186,54 +215,274 @@
     margin-bottom: 4px;
   }
 
-  /* Mode buttons */
-  .mode-buttons {
+  .inline-control {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr auto;
     gap: 6px;
+    margin-top: 8px;
   }
-  .mode-buttons button {
-    padding: 9px 6px;
+  .inline-control input,
+  .inline-control select {
+    width: 100%;
     background: var(--surface2);
     color: var(--text);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 10px;
+    padding: 9px 10px;
+    font-family: inherit;
+    font-size: 12px;
+  }
+  .inline-control input:focus,
+  .inline-control select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .inline-control button {
+    padding: 9px 12px;
+    background: #fffaf3;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .inline-control button:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+  }
+
+  .status-note {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface2);
+    color: var(--dim);
+    font-size: 11px;
+    line-height: 1.45;
+    display: none;
+  }
+  .status-note.show { display: block; }
+  .status-note.warn {
+    border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
+    color: var(--text);
+  }
+  .status-note.good {
+    border-color: color-mix(in srgb, var(--good) 55%, var(--border));
+    color: var(--text);
+  }
+
+  .runtime-pill {
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: rgba(242, 233, 219, 0.96);
+    min-width: 280px;
+    flex: 1 1 280px;
+  }
+  .runtime-pill .label {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    color: var(--dim);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .runtime-pill .mode {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+  }
+  .runtime-pill .target {
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text);
+    opacity: 0.9;
+    word-break: break-all;
+  }
+  .runtime-pill.main .mode { color: var(--accent); }
+  .runtime-pill.frozen .mode { color: var(--warn); }
+
+  .speed-pill {
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: rgba(242, 233, 219, 0.96);
+    min-width: 250px;
+    flex: 0 1 320px;
+  }
+  .speed-pill .label {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    color: var(--dim);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .speed-inline {
+    display: grid;
+    grid-template-columns: auto 88px auto;
+    gap: 8px;
+    align-items: center;
+  }
+  .speed-readout {
+    min-width: 48px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: #fffaf3;
+    border: 1px solid var(--border);
+    font-size: 16px;
+    font-weight: 700;
+    text-align: center;
+    color: var(--accent);
+  }
+  .speed-inline input {
+    width: 100%;
+    background: #fffaf3;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 9px 10px;
+    font-family: inherit;
+    font-size: 12px;
+  }
+  .speed-inline input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .speed-inline button {
+    padding: 9px 12px;
+    background: #fffaf3;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .speed-inline button:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+  }
+
+  .control-caption {
+    margin-top: 10px;
+    margin-bottom: 6px;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .helper-note {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--dim);
+    line-height: 1.45;
+  }
+
+  .under-video-grid {
+    margin-top: 14px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .compact-card {
+    padding: 14px;
+  }
+  .compact-card h2 {
+    margin-top: 0;
+  }
+
+  .mode-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .mode-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .mode-switch {
+    padding: 12px 10px;
+    background: #fffaf3;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 12px;
     cursor: pointer;
     font-family: inherit;
     font-size: 11px;
     letter-spacing: 0.1em;
+    text-transform: uppercase;
     transition: all 0.15s;
   }
-  .mode-buttons button:hover { border-color: var(--accent); }
-  .mode-buttons button.active.MANUAL    { background: var(--dim); color: var(--bg); }
-  .mode-buttons button.active.AUTOPILOT { background: var(--accent); color: var(--bg); border-color: var(--accent); }
-  .mode-buttons button.active.PAUSED    { background: var(--warn); color: var(--bg); border-color: var(--warn); }
-  .mode-buttons button.active.DATASET_COLLECTION { background: var(--good); color: var(--bg); border-color: var(--good); }
-
-  /* Action buttons */
-  .action-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px;
-    margin-top: 8px;
+  .mode-switch:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
   }
-  .action-row button {
-    padding: 8px;
+  .mode-switch.active.MANUAL { background: var(--dim); color: #fffaf3; }
+  .mode-switch.active.AUTOPILOT { background: var(--accent); color: #fffaf3; border-color: var(--accent); }
+  .mode-switch.active.PAUSED { background: var(--warn); color: #fffaf3; border-color: var(--warn); }
+  .mode-switch.active.DATASET_COLLECTION { background: var(--good); color: #fffaf3; border-color: var(--good); }
+  .mode-switch.active.TEACH { background: var(--human); color: #fffaf3; border-color: var(--human); }
+
+  .mode-subactions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .mode-subactions button {
+    width: 100%;
+    padding: 10px 10px;
     background: var(--surface2);
     color: var(--text);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 10px;
     cursor: pointer;
     font-family: inherit;
     font-size: 11px;
+    text-align: left;
+    transition: border-color 0.15s, transform 0.15s;
   }
-  .action-row button:hover { border-color: var(--human); }
+  .mode-subactions button:hover {
+    border-color: var(--human);
+    transform: translateY(-1px);
+  }
+  .mode-subactions .dataset-action:hover { border-color: var(--good); }
+  .mode-subactions .auto-action:hover { border-color: var(--warn); }
+
+  .action-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .action-row button {
+    padding: 10px;
+    background: #fffaf3;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .action-row button:hover {
+    border-color: var(--human);
+    transform: translateY(-1px);
+  }
   .action-row .danger:hover { border-color: var(--danger); }
 
-  /* Key map help */
   .keymap {
     background: var(--surface2);
-    border-radius: 4px;
+    border-radius: 12px;
     padding: 12px;
     font-size: 11px;
     color: var(--dim);
@@ -241,9 +490,9 @@
     margin-top: 12px;
   }
   .keymap kbd {
-    background: var(--bg);
+    background: #fffaf3;
     padding: 1px 6px;
-    border-radius: 3px;
+    border-radius: 6px;
     border: 1px solid var(--border);
     color: var(--text);
     font-family: inherit;
@@ -252,7 +501,6 @@
   }
   .keymap .row { padding: 2px 0; }
 
-  /* Connection indicator */
   .conn-dot {
     display: inline-block;
     width: 7px;
@@ -266,13 +514,12 @@
   .conn-dot.ok { background: var(--good); }
   @keyframes pulse { 50% { opacity: 0.4; } }
 
-  /* Selected angle dial — shown only in TEACH mode */
   .dial-container {
     text-align: center;
     margin: 12px 0;
     padding: 14px;
     background: var(--surface2);
-    border-radius: 4px;
+    border-radius: 12px;
     display: none;
   }
   .dial-container.show { display: block; }
@@ -300,14 +547,41 @@
     margin-top: 4px;
   }
 
-  /* Loss sparkline */
   .loss-history {
     height: 32px;
     background: var(--surface2);
-    border-radius: 4px;
+    border-radius: 12px;
     margin: 6px 0;
     position: relative;
     overflow: hidden;
+  }
+
+  #uiActionStatus {
+    margin-top: 10px;
+  }
+
+  @media (max-width: 980px) {
+    .grid {
+      grid-template-columns: 1fr;
+    }
+    .mode-banner {
+      flex-direction: column;
+    }
+    .banner-tools {
+      width: 100%;
+    }
+    .session-pill {
+      width: 100%;
+    }
+    .under-video-grid {
+      grid-template-columns: 1fr;
+    }
+    .mode-layout {
+      grid-template-columns: 1fr;
+    }
+    .speed-inline {
+      grid-template-columns: 1fr;
+    }
   }
 </style>
 </head>
@@ -315,13 +589,32 @@
 
 <!-- MODE BANNER -->
 <div class="mode-banner PAUSED" id="modeBanner">
-  <div>
-    <span class="conn-dot" id="connDot"></span>
-    <h1 id="modeTitle" style="display: inline-block;">PAUSED</h1>
+  <div class="banner-main">
+    <div>
+      <span class="conn-dot" id="connDot"></span>
+      <h1 id="modeTitle" style="display: inline-block;">PAUSED</h1>
+    </div>
+    <div class="banner-runtime-row">
+      <div class="runtime-pill main" id="runtimePill">
+        <span class="label">Selected Active Runtime</span>
+        <div class="mode" id="runtimeModeVal">ONLINE LEARNING MODEL (FCA)</div>
+        <div class="target" id="runtimeTargetVal">policy: —</div>
+      </div>
+      <div class="speed-pill">
+        <span class="label">Max Auto Speed</span>
+        <div class="speed-inline">
+          <div class="speed-readout"><span id="maxSpeedVal">35</span></div>
+          <input type="number" id="maxSpeedInput" min="0" max="100" step="1" value="35">
+          <button onclick="applyMaxSpeed()">SET SPEED</button>
+        </div>
+      </div>
+    </div>
   </div>
-  <div class="session-pill">
-    SESSION: <input type="text" id="sessionInput" value="default"
-                    onchange="setSession(this.value)">
+  <div class="banner-tools">
+    <div class="session-pill">
+      SESSION: <input type="text" id="sessionInput" value="default"
+                      onchange="setSession(this.value)">
+    </div>
   </div>
 </div>
 
@@ -357,32 +650,79 @@
       </div>
       <div class="angle-norm" id="selectedAngleNorm">norm: 0.500</div>
     </div>
+
+    <div class="under-video-grid">
+      <div class="card compact-card">
+        <h2>Inference</h2>
+        <div class="stat"><span class="label">Active backend</span>
+          <span class="value" id="inferenceBackendVal">Online learning model (FCA)</span></div>
+        <div class="stat"><span class="label">Frozen runtime</span>
+          <span class="value" id="frozenBackendVal">—</span></div>
+        <div class="control-caption">Selected active runtime</div>
+        <div class="inline-control">
+          <select id="inferenceBackendSelect" onchange="applyInferenceBackend()">
+            <option value="main">ONLINE LEARNING MODEL (FCA)</option>
+            <option value="frozen">FROZEN MODEL</option>
+          </select>
+          <button onclick="applyInferenceBackend()">APPLY</button>
+        </div>
+        <div class="inline-control" style="grid-template-columns: 1fr;">
+          <input type="text" id="frozenModelInput" placeholder="Frozen model path (.tflite / .keras / .h5)">
+        </div>
+        <div class="helper-note">Specify frozen model path for frozen model mode.</div>
+        <div class="status-note" id="teachWarningNote"></div>
+      </div>
+
+      <div class="card compact-card">
+        <h2>Adapter</h2>
+        <div class="stat"><span class="label">Policy head</span>
+          <span class="value" id="policyHeadVal">—</span></div>
+        <div class="inline-control">
+          <select id="policyHeadSelect" onchange="applyPolicyHead()"></select>
+          <button id="policyHeadApplyBtn" onclick="applyPolicyHead()">LOAD HEAD</button>
+        </div>
+        <div class="action-row">
+          <button onclick="saveCheckpoint()">💾 Save</button>
+          <button class="danger" onclick="resetAdapter()">↺ Reset weights</button>
+        </div>
+        <div class="stat"><span class="label">Last manual save</span>
+          <span class="value" id="checkpointSaveVal">Never</span></div>
+        <div class="checkpoint-path">
+          <strong>Checkpoint path</strong>
+          <span id="checkpointPathVal">—</span>
+        </div>
+        <div class="status-note" id="uiActionStatus"></div>
+      </div>
+    </div>
   </div>
 
   <!-- RIGHT COLUMN: Telemetry + Controls -->
   <div class="card">
     <h2>Mode</h2>
-    <div class="mode-buttons">
-      <button id="btn-PAUSED"    class="PAUSED"    onclick="setMode('PAUSED')">PAUSE</button>
-      <button id="btn-AUTOPILOT" class="AUTOPILOT" onclick="setMode('AUTOPILOT')">AUTO</button>
-      <button id="btn-TEACH"     class="TEACH"     onclick="setMode('TEACH')">TEACH</button>
-      <button id="btn-DATASET_COLLECTION" class="DATASET_COLLECTION" onclick="setMode('DATASET_COLLECTION')">DATASET</button>
-    </div>
-    <div class="action-row">
-      <button onclick="rewindAutopilot()">↶ REVERSE MODE (Q)</button>
-      <button onclick="markEvent()">★ MARK EVENT (M)</button>
-    </div>
-    <div class="action-row">
-      <button onclick="teachStopLabel()">🛑 TEACH STOP LABEL (X)</button>
-      <button disabled style="opacity:0.4; cursor:default;">TEACH ONLY</button>
-    </div>
-    <div class="action-row">
-      <button onclick="datasetStop()">⏸ DATASET STOP (Z)</button>
-      <button onclick="datasetResume()">▶ DATASET RESUME (V)</button>
-    </div>
-    <div class="action-row">
-      <button onclick="datasetCaptureStopFrame()">📸 CAPTURE STOP FRAME (C)</button>
-      <button disabled style="opacity:0.4; cursor:default;">DATASET ONLY</button>
+    <div class="mode-layout">
+      <div class="mode-panel">
+        <button id="btn-PAUSED" class="mode-switch PAUSED" onclick="setMode('PAUSED')">Pause</button>
+      </div>
+      <div class="mode-panel">
+        <button id="btn-AUTOPILOT" class="mode-switch AUTOPILOT" onclick="setMode('AUTOPILOT')">Auto</button>
+        <div class="mode-subactions">
+          <button class="auto-action" onclick="rewindAutopilot()">Reverse mode (Q)</button>
+        </div>
+      </div>
+      <div class="mode-panel">
+        <button id="btn-TEACH" class="mode-switch TEACH" onclick="setMode('TEACH')">Teach</button>
+        <div class="mode-subactions">
+          <button onclick="teachStopLabel()">Teach stop label (X)</button>
+        </div>
+      </div>
+      <div class="mode-panel">
+        <button id="btn-DATASET_COLLECTION" class="mode-switch DATASET_COLLECTION" onclick="setMode('DATASET_COLLECTION')">Dataset collection</button>
+        <div class="mode-subactions">
+          <button class="dataset-action" onclick="datasetCaptureStopFrame()">Capture stop frame (C)</button>
+          <button class="dataset-action" onclick="datasetStop()">Dataset stop (Z)</button>
+          <button class="dataset-action" onclick="datasetResume()">Dataset resume (V)</button>
+        </div>
+      </div>
     </div>
 
     <h2>Performance</h2>
@@ -409,18 +749,6 @@
     <div class="stat"><span class="label">Corrections</span>
       <span class="value" id="correctionsVal">0</span></div>
 
-    <h2>Adapter</h2>
-    <div class="action-row">
-      <button onclick="saveCheckpoint()">💾 Save</button>
-      <button class="danger" onclick="resetAdapter()">↺ Reset weights</button>
-    </div>
-    <div class="stat"><span class="label">Last manual save</span>
-      <span class="value" id="checkpointSaveVal">Never</span></div>
-    <div class="checkpoint-path">
-      <strong>Checkpoint path</strong>
-      <span id="checkpointPathVal">—</span>
-    </div>
-
     <h2>Keys</h2>
     <div class="keymap">
       <div class="row"><strong style="color:var(--text);">TEACH MODE</strong></div>
@@ -431,8 +759,8 @@
       <div class="row" style="margin-top:6px;"><strong style="color:var(--text);">AUTOPILOT</strong></div>
       <div class="row"><kbd>Q</kbd> reverse manual mode  <kbd>T</kbd> teach</div>
       <div class="row" style="margin-top:6px;"><strong style="color:var(--text);">ALWAYS</strong></div>
-      <div class="row"><kbd>1</kbd> pause  <kbd>2</kbd> auto  <kbd>3</kbd> teach  <kbd>4</kbd> dataset</div>
-      <div class="row"><kbd>Space</kbd> emergency pause  <kbd>M</kbd> mark event</div>
+      <div class="row"><kbd>1</kbd> pause  <kbd>2</kbd> auto  <kbd>3</kbd> teach  <kbd>4</kbd> dataset collection</div>
+      <div class="row"><kbd>Space</kbd> emergency pause</div>
       <div class="row"><kbd>Z</kbd> dataset stop  <kbd>C</kbd> capture stop frame  <kbd>V</kbd> dataset resume</div>
       <div class="row"><kbd>0</kbd> reset adapter  <kbd>P</kbd> save checkpoint</div>
     </div>
@@ -444,6 +772,37 @@ let ws = null;
 let reconnectTimer = null;
 let currentMode = 'PAUSED';
 let backwardHoldActive = false;
+let latestTelemetry = null;
+let pendingMaxSpeed = null;
+let pendingInferenceBackend = null;
+let pendingPolicyHead = null;
+let pendingFrozenPath = null;
+const PENDING_TTL_MS = 2500;
+
+function basename(path) {
+  if (!path) return '';
+  const normalized = String(path).replace(/\\\\/g, '/');
+  const parts = normalized.split('/');
+  return parts[parts.length - 1] || normalized;
+}
+
+function setUiActionStatus(message, kind = 'warn') {
+  const el = document.getElementById('uiActionStatus');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.add('show');
+  el.classList.remove('warn', 'good');
+  if (kind === 'good') el.classList.add('good');
+  else el.classList.add('warn');
+}
+
+function markActionPending(message) {
+  setUiActionStatus(message, 'warn');
+}
+
+function isPendingFresh(pending) {
+  return pending && (Date.now() - pending.atMs) < PENDING_TTL_MS;
+}
 
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
@@ -468,6 +827,8 @@ function connect() {
 connect();
 
 function updateTelemetry(d) {
+  latestTelemetry = d;
+
   // Mode banner
   const banner = document.getElementById('modeBanner');
   banner.classList.remove('AUTOPILOT', 'TEACH', 'REVERSE_MANUAL', 'PAUSED', 'DATASET_COLLECTION');
@@ -520,6 +881,146 @@ function updateTelemetry(d) {
   document.getElementById('bufferVal').textContent      = d.replay_buffer_size;
   document.getElementById('lossVal').textContent        = d.last_teach_loss > 0 ? d.last_teach_loss.toFixed(5) : '—';
   document.getElementById('correctionsVal').textContent = d.corrections_logged;
+  document.getElementById('maxSpeedVal').textContent    = d.max_speed;
+  const maxSpeedInput = document.getElementById('maxSpeedInput');
+  if (pendingMaxSpeed && d.max_speed === pendingMaxSpeed.value) {
+    pendingMaxSpeed = null;
+    setUiActionStatus('Max speed updated.', 'good');
+  }
+  const displayMaxSpeed = isPendingFresh(pendingMaxSpeed) ? pendingMaxSpeed.value : d.max_speed;
+  if (document.activeElement !== maxSpeedInput) {
+    maxSpeedInput.value = displayMaxSpeed;
+  }
+
+  const inferenceBackendVal = document.getElementById('inferenceBackendVal');
+  const frozenBackendVal = document.getElementById('frozenBackendVal');
+  const inferenceBackendSelect = document.getElementById('inferenceBackendSelect');
+  const frozenModelInput = document.getElementById('frozenModelInput');
+  inferenceBackendVal.textContent = d.inference_backend === 'frozen'
+    ? 'Frozen model'
+    : 'Online learning model (FCA)';
+  frozenBackendVal.textContent = d.frozen_model_backend || '—';
+
+  const runtimePill = document.getElementById('runtimePill');
+  const runtimeModeVal = document.getElementById('runtimeModeVal');
+  const runtimeTargetVal = document.getElementById('runtimeTargetVal');
+  const configuredFrozenPath = d.configured_frozen_model_path || d.frozen_model_path || '';
+
+  if (d.inference_backend === 'frozen') {
+    runtimePill.classList.remove('main');
+    runtimePill.classList.add('frozen');
+    runtimeModeVal.textContent = 'FROZEN MODEL';
+    runtimeTargetVal.textContent = `model: ${basename(d.frozen_model_path || configuredFrozenPath) || '—'} (${d.frozen_model_backend || 'runtime unknown'})`;
+  } else {
+    runtimePill.classList.remove('frozen');
+    runtimePill.classList.add('main');
+    runtimeModeVal.textContent = 'ONLINE LEARNING MODEL (FCA)';
+    runtimeTargetVal.textContent = `policy: ${d.active_policy_head || '—'}`;
+  }
+
+  if (pendingInferenceBackend && d.inference_backend === pendingInferenceBackend.value) {
+    pendingInferenceBackend = null;
+    setUiActionStatus(`Runtime switched to ${d.inference_backend === 'frozen' ? 'FROZEN' : 'ONLINE'}.`, 'good');
+  }
+  const displayInferenceBackend = isPendingFresh(pendingInferenceBackend)
+    ? pendingInferenceBackend.value
+    : (d.inference_backend || 'main');
+  if (document.activeElement !== inferenceBackendSelect) {
+    inferenceBackendSelect.value = displayInferenceBackend;
+  }
+  if (document.activeElement !== frozenModelInput) {
+    const displayFrozenPath = isPendingFresh(pendingFrozenPath)
+      ? pendingFrozenPath.value
+      : configuredFrozenPath;
+    frozenModelInput.value = displayFrozenPath;
+  }
+  if (pendingFrozenPath && configuredFrozenPath === pendingFrozenPath.value) {
+    pendingFrozenPath = null;
+    setUiActionStatus('Frozen model path updated.', 'good');
+  }
+  const mainOption = inferenceBackendSelect.querySelector('option[value="main"]');
+  if (mainOption) {
+    mainOption.disabled = !d.main_model_available;
+  }
+
+  const policyHeadVal = document.getElementById('policyHeadVal');
+  const policyHeadSelect = document.getElementById('policyHeadSelect');
+  const policyHeadApplyBtn = document.getElementById('policyHeadApplyBtn');
+  const availablePolicyHeads = Array.isArray(d.available_policy_heads) ? d.available_policy_heads : [];
+  const currentPolicyHead = d.active_policy_head || '';
+  policyHeadVal.textContent = currentPolicyHead || '—';
+
+  if (policyHeadSelect) {
+    const currentOptions = Array.from(policyHeadSelect.options).map(option => option.value);
+    const needsRebuild = currentOptions.length !== availablePolicyHeads.length
+      || currentOptions.some((value, index) => value !== availablePolicyHeads[index]);
+
+    if (needsRebuild) {
+      policyHeadSelect.innerHTML = '';
+      if (availablePolicyHeads.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No .pt heads found';
+        policyHeadSelect.appendChild(option);
+      } else {
+        availablePolicyHeads.forEach((name) => {
+          const option = document.createElement('option');
+          option.value = name;
+          option.textContent = name;
+          policyHeadSelect.appendChild(option);
+        });
+      }
+    }
+
+    if (document.activeElement !== policyHeadSelect) {
+      const displayedPolicyHead = isPendingFresh(pendingPolicyHead)
+        ? pendingPolicyHead.value
+        : currentPolicyHead;
+      if (displayedPolicyHead && availablePolicyHeads.includes(displayedPolicyHead)) {
+        policyHeadSelect.value = displayedPolicyHead;
+      } else if (availablePolicyHeads.length > 0) {
+        policyHeadSelect.value = availablePolicyHeads[0];
+      } else {
+        policyHeadSelect.value = '';
+      }
+    }
+
+    if (pendingPolicyHead && currentPolicyHead === pendingPolicyHead.value) {
+      pendingPolicyHead = null;
+      setUiActionStatus(`Policy head loaded: ${currentPolicyHead}.`, 'good');
+    }
+
+    const policyHeadEnabled = !!d.main_model_available && availablePolicyHeads.length > 0;
+    policyHeadSelect.disabled = !policyHeadEnabled;
+    policyHeadApplyBtn.disabled = !policyHeadEnabled;
+    policyHeadSelect.title = d.main_model_available
+      ? ''
+      : 'Policy head switching requires an online model.';
+  }
+
+  const teachBtn = document.getElementById('btn-TEACH');
+  if (teachBtn) {
+    teachBtn.disabled = !d.main_model_available;
+    teachBtn.title = d.main_model_available
+      ? ''
+      : 'TEACH requires an online model. Restart with --adapter deep or --adapter scalar.';
+    teachBtn.style.opacity = d.main_model_available ? '1' : '0.45';
+    teachBtn.style.cursor = d.main_model_available ? 'pointer' : 'not-allowed';
+  }
+
+  const teachWarningNote = document.getElementById('teachWarningNote');
+  if (teachWarningNote) {
+    let warning = '';
+    if (!d.main_model_available) {
+      warning = 'TEACH is unavailable in this run because no online model was loaded. Start with MAIN online mode enabled if you want TEACH updates.';
+    } else if (d.inference_backend === 'frozen') {
+      warning = 'FROZEN MODEL is active. Entering TEACH will update the online model checkpoint, not the frozen model currently driving AUTOPILOT.';
+    }
+
+    teachWarningNote.textContent = warning;
+    teachWarningNote.classList.toggle('show', Boolean(warning));
+    teachWarningNote.classList.toggle('warn', Boolean(warning));
+  }
 
   // Checkpoint status
   const saveEl = document.getElementById('checkpointSaveVal');
@@ -550,13 +1051,77 @@ function setBar(id, valNorm) {
 
 // ─── Commands ───────────────────────────────────────────────────────────
 function send(msg) {
-  if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify(msg));
+    return true;
+  }
+  setUiActionStatus('Not connected to server. Command was not sent.', 'warn');
+  return false;
 }
 
-function setMode(mode)         { send({ type: 'mode', value: mode }); }
+function setMode(mode) {
+  if (mode === 'TEACH') {
+    const telemetry = latestTelemetry || {};
+    if (!telemetry.main_model_available) {
+      alert('TEACH is unavailable because no online model was loaded in this run. Restart with --adapter deep or --adapter scalar.');
+      return;
+    }
+    if (telemetry.inference_backend === 'frozen') {
+      const proceed = confirm(
+        'FROZEN MODEL is active. TEACH will update the online model checkpoint, not the frozen model. Continue into TEACH mode?'
+      );
+      if (!proceed) return;
+    }
+  }
+
+  send({ type: 'mode', value: mode });
+}
 function setSession(label)     { send({ type: 'session', value: label }); }
 function rewindAutopilot()     { send({ type: 'rewind' }); }
 function saveCheckpoint()      { send({ type: 'save_checkpoint' }); }
+function applyMaxSpeed() {
+  const input = document.getElementById('maxSpeedInput');
+  const raw = parseInt(input.value, 10);
+  if (Number.isNaN(raw)) return;
+  const value = Math.max(0, Math.min(100, raw));
+  input.value = value;
+  pendingMaxSpeed = { value, atMs: Date.now() };
+  markActionPending(`Applying max speed ${value}...`);
+  if (!send({ type: 'set_max_speed', value })) {
+    pendingMaxSpeed = null;
+  }
+}
+function applyInferenceBackend() {
+  const backend = document.getElementById('inferenceBackendSelect').value;
+  const modelPath = document.getElementById('frozenModelInput').value.trim();
+  pendingInferenceBackend = { value: backend, atMs: Date.now() };
+  markActionPending(`Switching runtime to ${backend.toUpperCase()}...`);
+  if (!send({ type: 'set_inference_backend', backend, model_path: modelPath })) {
+    pendingInferenceBackend = null;
+  }
+}
+
+function applyFrozenModelPath() {
+  const frozenModelInput = document.getElementById('frozenModelInput');
+  const modelPath = frozenModelInput ? frozenModelInput.value.trim() : '';
+  if (!modelPath) return;
+  pendingFrozenPath = { value: modelPath, atMs: Date.now() };
+  markActionPending('Updating frozen model path...');
+  if (!send({ type: 'set_frozen_model_path', model_path: modelPath })) {
+    pendingFrozenPath = null;
+  }
+}
+
+function applyPolicyHead() {
+  const select = document.getElementById('policyHeadSelect');
+  const value = select ? select.value : '';
+  if (!value) return;
+  pendingPolicyHead = { value, atMs: Date.now() };
+  markActionPending(`Loading policy head ${value}...`);
+  if (!send({ type: 'set_policy_head', value })) {
+    pendingPolicyHead = null;
+  }
+}
 function resetAdapter() {
   if (confirm('Reset adapter weights to zero? Replay buffer will be kept.'))
     send({ type: 'reset_adapter' });
@@ -569,6 +1134,23 @@ function markEvent() {
   const desc = prompt('Event description (optional):', '');
   if (desc !== null) send({ type: 'event_marker', description: desc });
 }
+
+document.getElementById('maxSpeedInput').addEventListener('change', applyMaxSpeed);
+document.getElementById('maxSpeedInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    applyMaxSpeed();
+  }
+});
+
+document.getElementById('frozenModelInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    applyFrozenModelPath();
+  }
+});
+
+document.getElementById('frozenModelInput').addEventListener('change', applyFrozenModelPath);
 
 // ─── Keyboard handlers ──────────────────────────────────────────────────
 document.addEventListener('keydown', (e) => {

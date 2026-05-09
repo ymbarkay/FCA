@@ -82,6 +82,11 @@ class Motors:
 
             self.back_wheels.speed = speed_int
 
+    def set_max_speed(self, max_speed):
+        max_speed = int(max(0, min(100, int(max_speed))))
+        self.max_speed = max_speed
+        print(f"[motors] max_speed -> {self.max_speed}")
+
     def drive(self, angle_car, speed_car):
         """Send steering + throttle command. angle_car: 50-130°, speed_car: -max..max."""
         self.steer(angle_car)

@@ -129,6 +129,10 @@ def _handle_command(msg, state, controller, driving_loop, teach_controller, repl
             MODE_PAUSED,
             MODE_DATASET_COLLECTION,
         ):
+            if new_mode == MODE_TEACH and getattr(controller, "adapter", None) is None:
+                print("[server] ignored TEACH request: no online model is loaded")
+                return
+
             state.set_mode(new_mode)
 
             # Clear any pending teach command when changing mode
@@ -238,6 +242,53 @@ def _handle_command(msg, state, controller, driving_loop, teach_controller, repl
 
     elif t == "event_marker":
         state.add_event_marker(msg.get("description", ""))
+
+    elif t == "set_max_speed":
+        value = msg.get("value", 35)
+        try:
+            max_speed = int(value)
+        except (TypeError, ValueError):
+            print(f"[server] invalid max speed: {value}")
+            return
+
+        max_speed = max(0, min(100, max_speed))
+        controller.set_max_speed(max_speed)
+        if hasattr(driving_loop, "motors") and hasattr(driving_loop.motors, "set_max_speed"):
+            driving_loop.motors.set_max_speed(max_speed)
+        with state.lock:
+            state.max_speed = max_speed
+        print(f"[server] max speed -> {max_speed}")
+
+    elif t == "set_inference_backend":
+        backend = msg.get("backend", "")
+        model_path = msg.get("model_path", "")
+        try:
+            controller.set_inference_backend(backend, frozen_model_path=model_path)
+        except Exception as e:
+            print(f"[server] set_inference_backend failed: {e}")
+            return
+
+        print(f"[server] inference backend -> {backend}")
+
+    elif t == "set_frozen_model_path":
+        model_path = msg.get("model_path", "")
+        try:
+            controller.set_frozen_model_path(model_path)
+        except Exception as e:
+            print(f"[server] set_frozen_model_path failed: {e}")
+            return
+
+        print(f"[server] configured frozen model path -> {model_path}")
+
+    elif t == "set_policy_head":
+        value = msg.get("value", "")
+        try:
+            controller.switch_policy_head(value)
+        except Exception as e:
+            print(f"[server] set_policy_head failed: {e}")
+            return
+
+        print(f"[server] policy head -> {value}")
 
     # ── Adapter management ────────────────────────────────────────────────
     elif t == "reset_adapter":
