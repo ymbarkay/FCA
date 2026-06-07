@@ -68,6 +68,8 @@ LONG_HORIZON_MIN_BOOST_SCALE = 0.45
 LONG_HORIZON_MAX_REHEARSAL_SCALE = 2.6
 ENABLE_TEACH_PHOTOMETRIC_AUGMENTATION = True
 TEACH_AUGMENT_PROB = 0.35
+CAMERA_FOURCC = "MJPG"
+CAMERA_TARGET_FPS = 30
 
 
 class DrivingLoop:
@@ -128,6 +130,10 @@ class DrivingLoop:
         self._rehearsal_elder_bucket_counts = {}
         self._rehearsal_seen = 0
         self._rehearsal_elder_seen = 0
+        self.autopilot_frame_logging_enabled = bool(ENABLE_AUTOPILOT_FRAME_LOGGING)
+
+        with self.state.lock:
+            self.state.autopilot_frame_logging = self.autopilot_frame_logging_enabled
 
     # ─── Public API for GUI to inject commands ────────────────────────────
     def request_teach_command(self, command, **kwargs):
@@ -143,6 +149,12 @@ class DrivingLoop:
         """Request one stop-labeled dataset frame capture, regardless of mode."""
         with self._teach_lock:
             self._dataset_capture_global_pending = True
+
+    def set_autopilot_frame_logging(self, enabled):
+        enabled = bool(enabled)
+        self.autopilot_frame_logging_enabled = enabled
+        with self.state.lock:
+            self.state.autopilot_frame_logging = enabled
 
     def capture_validated_exemplars(self, capacity=VALIDATED_EXEMPLAR_CAPACITY):
         """Freeze a balanced exemplar bank from the current known-good rehearsal memory."""
@@ -183,6 +195,16 @@ class DrivingLoop:
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+        if CAMERA_FOURCC:
+            try:
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*CAMERA_FOURCC))
+            except Exception:
+                pass
+        if CAMERA_TARGET_FPS > 0:
+            try:
+                cap.set(cv2.CAP_PROP_FPS, CAMERA_TARGET_FPS)
+            except Exception:
+                pass
 
         print("[driving] loop started")
 
@@ -190,7 +212,9 @@ class DrivingLoop:
 
         while not self.state.shutdown:
             loop_t0 = time.time()
+            camera_t0 = loop_t0
             ret, frame = cap.read()
+            camera_ms = (time.time() - camera_t0) * 1000.0
 
             if not ret:
                 time.sleep(0.01)
@@ -210,26 +234,36 @@ class DrivingLoop:
                 fps = 0.0
 
             # Encode browser preview less often to reduce loop overhead.
-            self._preview_counter += 1
-            preview_stride = (
-                PREVIEW_EVERY_N_FRAMES_AUTOPILOT
-                if mode == MODE_AUTOPILOT
-                else PREVIEW_EVERY_N_FRAMES
-            )
-            if self._preview_counter >= preview_stride:
-                self._preview_counter = 0
+            with self.state.lock:
+                has_video_clients = self.state.video_client_count > 0
 
-                preview = cv2.resize(frame, (JPEG_WIDTH, JPEG_HEIGHT))
-                ok, jpeg = cv2.imencode(
-                    ".jpg",
-                    preview,
-                    [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY],
+            preview_ms = 0.0
+            if has_video_clients:
+                self._preview_counter += 1
+                preview_stride = (
+                    PREVIEW_EVERY_N_FRAMES_AUTOPILOT
+                    if mode == MODE_AUTOPILOT
+                    else PREVIEW_EVERY_N_FRAMES
                 )
+                if self._preview_counter >= preview_stride:
+                    self._preview_counter = 0
+                    preview_t0 = time.time()
 
-                if ok:
-                    with self.state.lock:
-                        self.state.latest_frame_jpeg = jpeg.tobytes()
-                        self.state.latest_frame_raw = frame
+                    preview = cv2.resize(frame, (JPEG_WIDTH, JPEG_HEIGHT))
+                    ok, jpeg = cv2.imencode(
+                        ".jpg",
+                        preview,
+                        [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY],
+                    )
+
+                    if ok:
+                        with self.state.lock:
+                            self.state.latest_frame_jpeg = jpeg.tobytes()
+                            self.state.latest_frame_raw = frame
+
+                    preview_ms = (time.time() - preview_t0) * 1000.0
+            else:
+                self._preview_counter = 0
 
             if mode != self._last_mode:
                 if mode != MODE_REVERSE_MANUAL:
@@ -268,6 +302,7 @@ class DrivingLoop:
                 self.state.adapter_ms = pred["adapter_ms"]
                 self.state.frames_processed += 1
                 self.state.replay_buffer_size = len(self.replay_buffer)
+                self.state.replay_buffer_bytes = self.replay_buffer.approximate_bytes()
                 self.state.selected_angle_car = self.teach_controller.get()
 
             dataset_capture_frame = False
@@ -281,6 +316,7 @@ class DrivingLoop:
                 dataset_angle_car_label = f"{self.teach_controller.get():.2f}"
 
             # Mode-dependent behaviour
+            control_t0 = time.time()
             if mode == MODE_AUTOPILOT:
                 self._handle_autopilot(pred, frame)
 
@@ -300,19 +336,46 @@ class DrivingLoop:
                     dataset_speed_norm_label,
                     dataset_angle_car_label,
                 ) = self._handle_dataset_collection()
+            control_ms = (time.time() - control_t0) * 1000.0
 
             # Log to CSV (throttled in AUTOPILOT for lower latency).
             self._log_counter += 1
-            should_log = True
+            should_log = mode != MODE_PAUSED
             if mode == MODE_AUTOPILOT:
-                if ENABLE_AUTOPILOT_FRAME_LOGGING:
+                if self.autopilot_frame_logging_enabled:
                     should_log = (self._log_counter % LOG_EVERY_N_FRAMES_AUTOPILOT) == 0
                 else:
                     should_log = False
 
+            logging_ms = 0.0
             if should_log:
+                logging_t0 = time.time()
                 try:
                     snapshot = self.state.telemetry_snapshot()
+                    snapshot.update({
+                        "config": pred.get("config", getattr(self.controller, "learning_paradigm", "")),
+                        "active_learning_paradigm": pred.get(
+                            "active_learning_paradigm",
+                            getattr(self.controller, "learning_paradigm", ""),
+                        ),
+                        "inference_backend": pred.get("inference_backend", getattr(self.controller, "inference_backend", "")),
+                        "feature_gate": pred.get("feature_gate", 1.0),
+                        "gate_e0": pred.get("gate_e0", 0.0),
+                        "gate_e1": pred.get("gate_e1", 0.0),
+                        "gate_e2": pred.get("gate_e2", 0.0),
+                        "gate_e3": pred.get("gate_e3", 0.0),
+                        "gate_entropy": pred.get("gate_entropy", 0.0),
+                        "top_expert": pred.get("top_expert", ""),
+                        "intent_pred": pred.get("intent_pred", ""),
+                        "intent_stop_prob": pred.get("intent_stop_prob", 0.0),
+                        "intent_left_prob": pred.get("intent_left_prob", 0.0),
+                        "intent_straight_prob": pred.get("intent_straight_prob", 0.0),
+                        "intent_right_prob": pred.get("intent_right_prob", 0.0),
+                        "final_angle_norm": pred.get("final_angle_norm", pred.get("base_angle_norm", 0.0)),
+                        "final_speed_prob": pred.get("final_speed_prob", pred.get("base_speed_prob", 0.0)),
+                    })
+                    if hasattr(self.controller, "training_metrics_snapshot"):
+                        snapshot.update(self.controller.training_metrics_snapshot())
                     self.session_logger.log_frame(
                         snapshot,
                         frame_bgr=frame,
@@ -322,6 +385,7 @@ class DrivingLoop:
                     )
                 except Exception as e:
                     print(f"[driving] log error: {e}")
+                logging_ms = (time.time() - logging_t0) * 1000.0
 
             loop_ms = (time.time() - loop_t0) * 1000.0
             model_ms = (
@@ -329,16 +393,24 @@ class DrivingLoop:
                 + float(pred.get("adapter_ms", 0.0))
                 + float(pred.get("inference_ms", 0.0))
             )
-            other_ms = max(0.0, loop_ms - model_ms)
+            measured_non_model_ms = camera_ms + preview_ms + control_ms + logging_ms
+            other_ms = max(0.0, loop_ms - model_ms - measured_non_model_ms)
 
             with self.state.lock:
+                self.state.camera_ms = camera_ms
+                self.state.preview_ms = preview_ms
                 self.state.loop_ms = loop_ms
+                self.state.control_ms = control_ms
+                self.state.logging_ms = logging_ms
                 self.state.other_ms = other_ms
 
             # FPS report every 5s
             if now - fps_report_time > 5.0:
                 print(
                     f"[driving] {fps:.1f} FPS  mode={mode}  "
+                    f"cam={camera_ms:.1f}ms  prev={preview_ms:.1f}ms  "
+                    f"ctrl={control_ms:.1f}ms  log={logging_ms:.1f}ms  "
+                    f"other={other_ms:.1f}ms  "
                     f"replay={len(self.replay_buffer)}  "
                     f"updates={self.state.total_updates}  "
                     f"loss={self.state.last_teach_loss:.4f}"
@@ -403,6 +475,119 @@ class DrivingLoop:
 
         except Exception as e:
             print(f"[driving] anchor sample failed: {e}")
+
+    def _teach_assignment(self, human_angle_car, human_speed_norm):
+        target_intent = ""
+        assigned_expert = ""
+        try:
+            if hasattr(self.controller, "target_intent_from_controls"):
+                target_intent = self.controller.target_intent_from_controls(
+                    human_angle_car,
+                    human_speed_norm,
+                )
+            if target_intent and hasattr(self.controller, "selected_expert_for_intent"):
+                assigned_expert = self.controller.selected_expert_for_intent(target_intent)
+        except Exception:
+            target_intent = ""
+            assigned_expert = ""
+        return target_intent, assigned_expert
+
+    def _correction_log_fields(
+        self,
+        pred,
+        human_angle_car,
+        human_speed_norm,
+        target_intent_override="",
+        selected_expert_override="",
+        train_metrics_override=None,
+        focused_teach_loss=None,
+        rehearsal_loss=None,
+    ):
+        train_metrics = {}
+        if train_metrics_override is not None:
+            train_metrics = dict(train_metrics_override)
+        elif hasattr(self.controller, "training_metrics_snapshot"):
+            train_metrics = self.controller.training_metrics_snapshot()
+
+        state_snapshot = self.state.telemetry_snapshot()
+        target_intent = ""
+        try:
+            if hasattr(self.controller, "target_intent_from_controls"):
+                target_intent = self.controller.target_intent_from_controls(
+                    human_angle_car,
+                    human_speed_norm,
+                )
+        except Exception:
+            target_intent = ""
+
+        fields = {
+            "config": pred.get("config", getattr(self.controller, "learning_paradigm", "")),
+            "active_learning_paradigm": pred.get(
+                "active_learning_paradigm",
+                getattr(self.controller, "learning_paradigm", ""),
+            ),
+            "inference_backend": pred.get("inference_backend", getattr(self.controller, "inference_backend", "")),
+            "feature_gate": pred.get("feature_gate", 1.0),
+            "base_angle_norm": pred.get("base_angle_norm", 0.0),
+            "final_angle_norm": pred.get("final_angle_norm", pred.get("base_angle_norm", 0.0)),
+            "final_angle_car": pred.get("final_angle_car", 0.0),
+            "base_speed_prob": pred.get("base_speed_prob", 0.0),
+            "final_speed_prob": pred.get("final_speed_prob", pred.get("base_speed_prob", 0.0)),
+            "final_speed_car": pred.get("final_speed_car", 0.0),
+            "feature_ms": pred.get("feature_ms", 0.0),
+            "inference_ms": pred.get("inference_ms", 0.0),
+            "adapter_ms": pred.get("adapter_ms", 0.0),
+            "human_angle_car": human_angle_car,
+            "human_speed_norm": human_speed_norm,
+            "target_intent": target_intent,
+            "gate_e0": pred.get("gate_e0", 0.0),
+            "gate_e1": pred.get("gate_e1", 0.0),
+            "gate_e2": pred.get("gate_e2", 0.0),
+            "gate_e3": pred.get("gate_e3", 0.0),
+            "gate_entropy": pred.get("gate_entropy", 0.0),
+            "top_expert": pred.get("top_expert", ""),
+            "intent_pred": pred.get("intent_pred", ""),
+            "intent_stop_prob": pred.get("intent_stop_prob", 0.0),
+            "intent_left_prob": pred.get("intent_left_prob", 0.0),
+            "intent_straight_prob": pred.get("intent_straight_prob", 0.0),
+            "intent_right_prob": pred.get("intent_right_prob", 0.0),
+            "replay_buffer_size": state_snapshot.get("replay_buffer_size", 0),
+            "replay_buffer_bytes": state_snapshot.get("replay_buffer_bytes", 0),
+            "total_updates": state_snapshot.get("total_updates", 0),
+            "last_teach_loss": state_snapshot.get("last_teach_loss", 0.0),
+            "focused_teach_loss": state_snapshot.get("last_focused_teach_loss", 0.0),
+            "rehearsal_loss": state_snapshot.get("last_rehearsal_loss", 0.0),
+            "last_learning_step_ms": state_snapshot.get("last_learning_step_ms", 0.0),
+            "avg_learning_step_ms": state_snapshot.get("avg_learning_step_ms", 0.0),
+        }
+        fields.update(train_metrics)
+
+        if target_intent_override:
+            fields["target_intent"] = target_intent_override
+        elif target_intent:
+            fields["target_intent"] = target_intent
+
+        if selected_expert_override:
+            fields["selected_expert_for_teach"] = selected_expert_override
+
+        if focused_teach_loss is not None:
+            fields["focused_teach_loss"] = float(max(0.0, float(focused_teach_loss)))
+
+        if rehearsal_loss is not None:
+            fields["rehearsal_loss"] = float(max(0.0, float(rehearsal_loss)))
+
+        if not fields.get("selected_expert_for_teach") and getattr(
+            self.controller,
+            "INTENT_EXPERT_SUPERVISION_ENABLED",
+            False,
+        ):
+            try:
+                if hasattr(self.controller, "selected_expert_for_intent"):
+                    fields["selected_expert_for_teach"] = self.controller.selected_expert_for_intent(target_intent)
+            except Exception:
+                pass
+
+        return fields
 
     def _handle_teach(self, pred, frame):
         """
@@ -574,44 +759,97 @@ class DrivingLoop:
 
         last_loss = 0.0
         steps_done = 0
+        step_time_total_ms = 0.0
 
         for _ in range(n_steps):
             sample = self.replay_buffer.sample(batch_size=16)
-
             if sample is None:
                 break
 
             features, deltas, speeds = sample
 
             try:
+                step_t0 = time.perf_counter()
                 last_loss = self.controller.gradient_step(
                     features,
                     deltas,
                     speeds,
                     train_speed=True,
+                    training_context="generic",
                 )
+                step_time_total_ms += (time.perf_counter() - step_t0) * 1000.0
                 steps_done += 1
 
             except Exception as e:
                 print(f"[driving] gradient step failed: {e}")
                 break
 
-        with self.state.lock:
-            self.state.last_teach_loss = last_loss
-            self.state.total_updates += steps_done
+        self.state.record_learning_steps(step_time_total_ms, steps_done, last_loss=last_loss)
 
         return last_loss
 
-    def _boost_latest_target(self, target, n_steps=None, lr_multiplier=None):
+    def _controller_intent_scale(self, attr_name, intent_name, default=1.0, minimum=0.0):
+        mapping = getattr(self.controller, attr_name, None)
+        value = default
+
+        if isinstance(mapping, dict):
+            key = str(intent_name or "").strip().lower()
+            if key and key in mapping:
+                value = mapping[key]
+            elif "*" in mapping:
+                value = mapping["*"]
+
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            value = float(default)
+
+        return max(float(minimum), value)
+
+    def _boost_latest_target(
+        self,
+        target,
+        n_steps=None,
+        lr_multiplier=None,
+        target_intent_name="",
+        selected_expert_name="",
+    ):
         """Run focused mixed updates so the newest correction does not overwrite older ones."""
         if target is None or self.controller.adapter is None:
-            return 0.0
+            return 0.0, {}
 
         if n_steps is None:
             n_steps = self.BOOST_STEPS_PER_COMMIT
 
         if lr_multiplier is None:
             lr_multiplier = self.BOOST_LR_MULTIPLIER
+
+        n_steps = int(round(
+            float(n_steps)
+            * self._controller_intent_scale(
+                "TEACH_FOCUSED_STEP_SCALE_BY_INTENT",
+                target_intent_name,
+                default=1.0,
+                minimum=0.25,
+            )
+        ))
+        n_steps = max(1, min(14, n_steps))
+        lr_cap = self._controller_intent_scale(
+            "TEACH_FOCUSED_MAX_LR_MULTIPLIER_BY_INTENT",
+            target_intent_name,
+            default=getattr(self.controller, "TEACH_FOCUSED_MAX_LR_MULTIPLIER", 5.25),
+            minimum=0.5,
+        )
+        lr_multiplier = min(
+            lr_cap,
+            float(lr_multiplier)
+            * self._controller_intent_scale(
+                "TEACH_FOCUSED_LR_SCALE_BY_INTENT",
+                target_intent_name,
+                default=1.0,
+                minimum=0.25,
+            ),
+        )
 
         features = target.get("input_features")
         if features is None:
@@ -631,12 +869,36 @@ class DrivingLoop:
         batch_target_deltas = torch.tensor([[target_delta]], dtype=torch.float32)
         batch_target_speeds = torch.tensor([[target_speed]], dtype=torch.float32)
 
-        batch_features = batch_features.repeat(BOOST_TARGET_REPEATS, 1)
-        batch_target_deltas = batch_target_deltas.repeat(BOOST_TARGET_REPEATS, 1)
-        batch_target_speeds = batch_target_speeds.repeat(BOOST_TARGET_REPEATS, 1)
+        target_repeats = int(round(
+            BOOST_TARGET_REPEATS
+            * self._controller_intent_scale(
+                "FOCUSED_TARGET_REPEAT_SCALE_BY_INTENT",
+                target_intent_name,
+                default=1.0,
+                minimum=0.25,
+            )
+        ))
+        target_repeats = max(1, min(16, target_repeats))
+
+        batch_features = batch_features.repeat(target_repeats, 1)
+        batch_target_deltas = batch_target_deltas.repeat(target_repeats, 1)
+        batch_target_speeds = batch_target_speeds.repeat(target_repeats, 1)
 
         last_loss = 0.0
         steps_done = 0
+        step_time_total_ms = 0.0
+        focus_metrics = {}
+        focused_rehearsal_batch_size = int(round(
+            BOOST_REHEARSAL_BATCH_SIZE
+            * float(max(0.0, getattr(self.controller, "FOCUSED_REHEARSAL_BATCH_SCALE", 1.0)))
+            * self._controller_intent_scale(
+                "FOCUSED_REHEARSAL_BATCH_SCALE_BY_INTENT",
+                target_intent_name,
+                default=1.0,
+                minimum=0.0,
+            )
+        ))
+        focused_rehearsal_batch_size = max(0, focused_rehearsal_batch_size)
 
         optimizer = getattr(self.controller, "optimizer", None)
         old_lrs = None
@@ -648,11 +910,14 @@ class DrivingLoop:
 
         try:
             for _ in range(n_steps):
-                rehearsal_batch = self._sample_rehearsal_items(BOOST_REHEARSAL_BATCH_SIZE)
+                rehearsal_batch = []
+                if focused_rehearsal_batch_size > 0:
+                    rehearsal_batch = self._sample_rehearsal_items(focused_rehearsal_batch_size)
 
                 step_features = batch_features
                 step_target_deltas = batch_target_deltas
                 step_target_speeds = batch_target_speeds
+                supervision_mask = torch.ones(step_features.shape[0], dtype=torch.bool)
 
                 if rehearsal_batch:
                     rehearsal_features = torch.stack([item[0] for item in rehearsal_batch], dim=0)
@@ -668,6 +933,13 @@ class DrivingLoop:
                     step_features = torch.cat((step_features, rehearsal_features), dim=0)
                     step_target_deltas = torch.cat((step_target_deltas, rehearsal_deltas), dim=0)
                     step_target_speeds = torch.cat((step_target_speeds, rehearsal_speeds), dim=0)
+                    supervision_mask = torch.cat(
+                        (
+                            supervision_mask,
+                            torch.zeros(rehearsal_features.shape[0], dtype=torch.bool),
+                        ),
+                        dim=0,
+                    )
 
                 try:
                     historical_blend = 0.0
@@ -676,6 +948,7 @@ class DrivingLoop:
                             getattr(self.controller, "HISTORICAL_GRADIENT_BLEND", 0.0)
                         )
 
+                    step_t0 = time.perf_counter()
                     last_loss = self.controller.gradient_step(
                         step_features,
                         step_target_deltas,
@@ -685,7 +958,14 @@ class DrivingLoop:
                         clip_grad_norm=1.0,
                         historical_blend=historical_blend,
                         update_historical=False,
+                        training_context="teach_focus",
+                        expert_supervision_mask=supervision_mask,
+                        target_intent_override=target_intent_name,
+                        selected_expert_override=selected_expert_name,
                     )
+                    if hasattr(self.controller, "training_metrics_snapshot"):
+                        focus_metrics = self.controller.training_metrics_snapshot()
+                    step_time_total_ms += (time.perf_counter() - step_t0) * 1000.0
                     steps_done += 1
                 except Exception as e:
                     print(f"[driving] focused teach update failed: {e}")
@@ -695,11 +975,11 @@ class DrivingLoop:
                 for group, old_lr in zip(optimizer.param_groups, old_lrs):
                     group["lr"] = old_lr
 
-        with self.state.lock:
-            self.state.last_teach_loss = last_loss
-            self.state.total_updates += steps_done
+        self.state.record_learning_steps(step_time_total_ms, steps_done, last_loss=last_loss)
+        if hasattr(self.state, "record_focused_teach_loss"):
+            self.state.record_focused_teach_loss(last_loss if steps_done > 0 else 0.0)
 
-        return last_loss
+        return last_loss, focus_metrics
 
     def _remember_target_for_rehearsal(self, target):
         """Store a compact CPU copy of a correction target for later rehearsal."""
@@ -936,12 +1216,18 @@ class DrivingLoop:
             for group in optimizer.param_groups:
                 group["lr"] = max(1e-5, group["lr"] * REHEARSAL_LR_MULTIPLIER)
 
+        batch_size_scale = float(max(0.5, getattr(self.controller, "REHEARSAL_BATCH_SIZE_SCALE", 1.0)))
+        effective_batch_size = max(4, int(round(REHEARSAL_BATCH_SIZE * batch_size_scale)))
+        steps_scale = float(max(0.5, getattr(self.controller, "REHEARSAL_STEPS_SCALE", 1.0)))
+        effective_steps = max(1, int(round(max(1, n_steps) * steps_scale)))
+
         last_loss = 0.0
         steps_done = 0
+        step_time_total_ms = 0.0
 
         try:
-            for _ in range(max(1, n_steps)):
-                batch_n = min(REHEARSAL_BATCH_SIZE, total_n)
+            for _ in range(effective_steps):
+                batch_n = min(effective_batch_size, total_n)
                 batch = self._sample_rehearsal_items(batch_n)
 
                 if not batch:
@@ -952,6 +1238,7 @@ class DrivingLoop:
                 speeds = torch.tensor([b[2] for b in batch], dtype=torch.float32).unsqueeze(-1)
 
                 try:
+                    step_t0 = time.perf_counter()
                     last_loss = self.controller.gradient_step(
                         features,
                         deltas,
@@ -963,7 +1250,9 @@ class DrivingLoop:
                             getattr(self.controller, "HISTORICAL_GRADIENT_BLEND", 0.0)
                         ),
                         update_historical=True,
+                        training_context="rehearsal",
                     )
+                    step_time_total_ms += (time.perf_counter() - step_t0) * 1000.0
                     steps_done += 1
                 except Exception as e:
                     print(f"[driving] rehearsal step failed: {e}")
@@ -973,10 +1262,9 @@ class DrivingLoop:
                 for group, old_lr in zip(optimizer.param_groups, old_lrs):
                     group["lr"] = old_lr
 
-        if steps_done > 0:
-            with self.state.lock:
-                self.state.last_teach_loss = last_loss
-                self.state.total_updates += steps_done
+        self.state.record_learning_steps(step_time_total_ms, steps_done, last_loss=last_loss)
+        if hasattr(self.state, "record_rehearsal_loss"):
+            self.state.record_rehearsal_loss(last_loss if steps_done > 0 else 0.0)
 
         return last_loss
 
@@ -1092,6 +1380,8 @@ class DrivingLoop:
                 target["target_speed_norm"],
             )
 
+        target_intent, assigned_expert = self._teach_assignment(selected_angle_car, 1.0)
+
         # Strengthen immediate effect of this exact teaching event.
         boost_steps, boost_lr_mult, rehearsal_steps = self._compute_teach_update_profile(
             predicted_angle_car=pred["final_angle_car"],
@@ -1099,7 +1389,14 @@ class DrivingLoop:
             predicted_speed_prob=pred["base_speed_prob"],
             target_speed_norm=1.0,
         )
-        loss = self._boost_latest_target(target, n_steps=boost_steps, lr_multiplier=boost_lr_mult)
+        focused_loss, focused_metrics = self._boost_latest_target(
+            target,
+            n_steps=boost_steps,
+            lr_multiplier=boost_lr_mult,
+            target_intent_name=target_intent,
+            selected_expert_name=assigned_expert,
+        )
+        loss = focused_loss
 
         # Rehearse older teach corrections to preserve previously learned locations.
         rehearsal_loss = self._rehearsal_update(n_steps=rehearsal_steps)
@@ -1118,14 +1415,19 @@ class DrivingLoop:
             self.session_logger.log_correction(
                 frame_bgr=frame,
                 command="forward_long" if long else "forward",
-                base_angle_norm=pred["base_angle_norm"],
-                base_speed_prob=pred["base_speed_prob"],
-                human_angle_car=selected_angle_car,
-                human_speed_norm=1.0,
+                session=self.state.session_label,
                 target_delta_angle=target["target_delta_angle"] if target else 0.0,
                 loss_after_update=loss,
-                total_updates=self.state.total_updates,
-                session=self.state.session_label,
+                **self._correction_log_fields(
+                    pred,
+                    selected_angle_car,
+                    1.0,
+                    target_intent_override=target_intent,
+                    selected_expert_override=assigned_expert,
+                    train_metrics_override=focused_metrics,
+                    focused_teach_loss=focused_loss,
+                    rehearsal_loss=rehearsal_loss,
+                ),
             )
         except Exception as e:
             print(f"[driving] correction log failed: {e}")
@@ -1167,6 +1469,8 @@ class DrivingLoop:
                 target["target_speed_norm"],
             )
 
+        target_intent, assigned_expert = self._teach_assignment(selected_angle_car, 0.0)
+
         # Strengthen immediate effect of this exact teaching event.
         boost_steps, boost_lr_mult, rehearsal_steps = self._compute_teach_update_profile(
             predicted_angle_car=pred["final_angle_car"],
@@ -1174,7 +1478,14 @@ class DrivingLoop:
             predicted_speed_prob=pred["base_speed_prob"],
             target_speed_norm=0.0,
         )
-        loss = self._boost_latest_target(target, n_steps=boost_steps, lr_multiplier=boost_lr_mult)
+        focused_loss, focused_metrics = self._boost_latest_target(
+            target,
+            n_steps=boost_steps,
+            lr_multiplier=boost_lr_mult,
+            target_intent_name=target_intent,
+            selected_expert_name=assigned_expert,
+        )
+        loss = focused_loss
 
         rehearsal_loss = self._rehearsal_update(n_steps=rehearsal_steps)
         if rehearsal_loss > 0:
@@ -1189,14 +1500,19 @@ class DrivingLoop:
             self.session_logger.log_correction(
                 frame_bgr=frame,
                 command="stop",
-                base_angle_norm=pred["base_angle_norm"],
-                base_speed_prob=pred["base_speed_prob"],
-                human_angle_car=selected_angle_car,
-                human_speed_norm=0.0,
+                session=self.state.session_label,
                 target_delta_angle=target["target_delta_angle"] if target else 0.0,
                 loss_after_update=loss,
-                total_updates=self.state.total_updates,
-                session=self.state.session_label,
+                **self._correction_log_fields(
+                    pred,
+                    selected_angle_car,
+                    0.0,
+                    target_intent_override=target_intent,
+                    selected_expert_override=assigned_expert,
+                    train_metrics_override=focused_metrics,
+                    focused_teach_loss=focused_loss,
+                    rehearsal_loss=rehearsal_loss,
+                ),
             )
         except Exception as e:
             print(f"[driving] correction log failed: {e}")

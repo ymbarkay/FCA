@@ -18,6 +18,14 @@ class ReplayBuffer:
         self.capacity = capacity
         self.buffer = deque(maxlen=capacity)
         self.lock = threading.Lock()
+        self._estimated_bytes = 0
+
+    @staticmethod
+    def _estimate_item_bytes(features, target_delta_angle, target_speed_norm, sample_kind):
+        feature_bytes = int(features.element_size() * features.numel())
+        scalar_bytes = 16  # two stored Python float values, tracked as payload only
+        kind_bytes = len(str(sample_kind).encode("utf-8"))
+        return feature_bytes + scalar_bytes + kind_bytes
 
     def add(self, input_features, target_delta_angle, target_speed_norm, sample_kind="correction"):
         """input_features: tensor or numpy array — stored on CPU."""
@@ -26,13 +34,21 @@ class ReplayBuffer:
         else:
             features = torch.tensor(input_features, dtype=torch.float32)
 
+        item = (
+            features,
+            float(target_delta_angle),
+            float(target_speed_norm),
+            str(sample_kind),
+        )
+        item_bytes = self._estimate_item_bytes(*item)
+
         with self.lock:
-            self.buffer.append((
-                features,
-                float(target_delta_angle),
-                float(target_speed_norm),
-                str(sample_kind),
-            ))
+            if len(self.buffer) >= self.capacity:
+                evicted = self.buffer.popleft()
+                self._estimated_bytes -= self._estimate_item_bytes(*evicted)
+
+            self.buffer.append(item)
+            self._estimated_bytes += item_bytes
 
     def sample(self, batch_size):
         """Return a tuple (features, target_deltas, target_speeds) or None."""
@@ -97,6 +113,10 @@ class ReplayBuffer:
         with self.lock:
             return len(self.buffer)
 
+    def approximate_bytes(self):
+        with self.lock:
+            return max(0, int(self._estimated_bytes))
+
     def correction_count(self):
         """Count correction samples (non-anchor) currently in buffer."""
         with self.lock:
@@ -110,3 +130,4 @@ class ReplayBuffer:
     def clear(self):
         with self.lock:
             self.buffer.clear()
+            self._estimated_bytes = 0

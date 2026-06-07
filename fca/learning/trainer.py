@@ -66,6 +66,7 @@ def run_trainer(
         features, deltas, speeds = sample
 
         try:
+            step_t0 = time.perf_counter()
             loss = controller.gradient_step(
                 features,
                 deltas,
@@ -76,13 +77,12 @@ def run_trainer(
                 ),
                 update_historical=True,
             )
+            step_ms = (time.perf_counter() - step_t0) * 1000.0
         except Exception as e:
             print(f"[trainer] gradient step failed: {e}")
             continue
 
-        with state.lock:
-            state.last_teach_loss = loss
-            state.total_updates += 1
+        state.record_learning_steps(step_ms, 1, last_loss=loss)
 
         updates_since_checkpoint += 1
 

@@ -36,12 +36,14 @@ from silently overwriting that checkpoint.
 fca/
 ├── run.py                       Entry point
 ├── requirements.txt             Pi dependencies
+├── requirements-analysis.txt    Extra analysis-studio dependencies
 ├── README.md                    This file
 ├── LICENSE                      MIT license
 ├── checkpoints/                 Adapter weights (auto-saved)
 ├── logs/                        Per-session CSVs + dataset captures
 ├── tflite_models/               Place your .tflite files here
 ├── train_live_policy_head.py    Offline trainer for the live policy head
+├── fca_analysis_studio/         Streamlit analysis side app
 └── fca/
     ├── core/
     │   ├── state.py             Shared mode + telemetry
@@ -52,8 +54,9 @@ fca/
     │   └── feature_extractor.py EdgeTPU/CPU feature extractor wrapper
     ├── learning/
     │   ├── adapter_scalar.py    Legacy scalar residual adapter
-    │   ├── live_policy_head.py  Trainable PyTorch MoE policy head (v4 intent routing)
+    │   ├── live_policy_head.py  Trainable PyTorch policy heads + compatibility loader
     │   ├── controller.py        Inference + online update orchestration
+    │   ├── paradigms/           Registry-driven dense/MoE online learning variants
     │   ├── replay_buffer.py     Replay buffer helper
     │   └── trainer.py           Optional background gradient step thread
     ├── control/
@@ -95,6 +98,12 @@ pip install -r requirements.txt
 # If pip runs out of memory: pip install -r requirements.txt --no-cache-dir
 ```
 
+Optional for the Streamlit analysis side app:
+
+```bash
+pip install -r requirements.txt -r requirements-analysis.txt
+```
+
 ### 4. Place your frozen models
 
 ```bash
@@ -134,6 +143,7 @@ installed in that environment.
 python3 run.py --mode test --adapter deep \
   --feature-model tflite_models/feature_extractor_dense512_int8_edgetpu.tflite \
   --checkpoint checkpoints/live_policy_head_512.pt \
+  --learning-paradigm moe_v6_1_stabilized_ownership \
   --learning-rate 1e-4 \
   --no-trainer
 
@@ -141,6 +151,7 @@ python3 run.py --mode test --adapter deep \
 python3 run.py --mode drive --adapter deep \
   --feature-model tflite_models/feature_extractor_dense512_int8_edgetpu.tflite \
   --checkpoint checkpoints/live_policy_head_512.pt \
+  --learning-paradigm moe_v6_1_stabilized_ownership \
   --learning-rate 1e-4 \
   --no-trainer
 
@@ -166,6 +177,11 @@ python3 run.py --mode drive --adapter deep --no-gui \
 `--no-trainer` disables the optional background replay-training thread. Teach
 commits (`W` / `Shift+W` / `X`) still perform immediate event-triggered updates.
 
+Deep mode also supports registry-driven learning paradigms through
+`--learning-paradigm`. Current options include the dense single-head baseline,
+Gate-Balanced MoE, Intent-Routed MoE, Intent-Supervised Plastic Experts,
+Stabilized Ownership MoE, and Turn-Sharpened Plasticity MoE.
+
 Open `http://<pi-ip>:5000` from your laptop browser.
 
 The GUI now includes a `Max auto speed` control that changes the runtime
@@ -181,6 +197,32 @@ In online runs, the GUI `Adapter` section also lets you switch the active
 policy-head checkpoint by choosing from the available `.pt` files in the
 checkpoint directory. The newly selected head becomes the active online model
 and subsequent saves continue to write to that file.
+
+When `--adapter deep` is active, the GUI also exposes the available online
+learning paradigms discovered from `fca/learning/paradigms/`, so you can swap
+between dense and MoE variants without editing code.
+
+## Analysis studio
+
+The repo now includes `fca_analysis_studio/`, a separate Streamlit app for:
+
+- Feature probes and extractor comparison
+- Feature-space comparison for paper-ready PCA/UMAP figures
+- Expert usage / MoE routing analysis
+- Transfer-metric summaries
+- Latency summaries and export tables
+
+Run it directly as its own standalone app:
+
+```bash
+streamlit run fca_analysis_studio/app.py --server.address 0.0.0.0 --server.port 8501
+```
+
+If the browser loads the Streamlit shell but then reports that the server is not responding, inspect `logs/analysis_studio.log` on the Pi. That usually means the app failed during startup or import, not that the Pi needs internet access.
+
+The studio writes generated PNG/CSV/TEX artifacts under
+`fca_analysis_studio/outputs/`; these are derived outputs rather than source
+files.
 
 ## Usage workflow
 
@@ -225,6 +267,8 @@ Each session writes outputs under `logs/`:
 - `<timestamp>_<session>_corrections.csv` — TEACH correction events
 - `<timestamp>_<session>_frames/` — optional saved correction-event frames
 - `<timestamp>_<session>_dataset/` — dataset-mode PNG frames plus `train.csv`
+
+AUTOPILOT frame CSV logging is off by default to reduce runtime overhead. When you need full evaluation traces, enable `Auto frame logs` in the operator UI Learning panel before the run. Those frame logs include the MoE gate and intent columns when the online deep model is active.
 
 Dataset export format in `<timestamp>_<session>_dataset/train.csv`:
 

@@ -3,3 +3,8 @@ checkpoints/
 tflite_models/
 __pycache__/
 *.pyc
+fca_analysis_studio/outputs/
+fca_analysis_studio/left/
+fca_analysis_studio/right/
+fca_analysis_studio/single_sign/
+fca_analysis_studio/two_sign/

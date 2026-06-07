@@ -3,787 +3,842 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FCA Operator · Feedback-based Continual Adaptation</title>
+<title>FCA :: operator</title>
 <style>
   :root {
-    --bg: #efe6d8;
-    --surface: rgba(255, 250, 242, 0.96);
-    --surface2: #eadfce;
-    --accent: #2f6a5d;
-    --human: #b85c38;
-    --good: #4f7b40;
-    --warn: #b67a2a;
-    --danger: #b04444;
-    --text: #1f2a24;
-    --dim: #6d756d;
-    --border: rgba(55, 73, 64, 0.18);
-    --shadow: 0 18px 40px rgba(80, 61, 42, 0.10);
+    --bg: #0d0f10;
+    --bg-2: #15181a;
+    --panel: #1a1d1f;
+    --panel-2: #202426;
+    --rule: #2a2f32;
+    --rule-2: #3a4044;
+    --ink: #e8e6e1;
+    --ink-dim: #8a8d8a;
+    --ink-mute: #5a5d5a;
+    --accent: #8fc9b0;        /* online runtime - sage */
+    --teach: #e8a87c;         /* teach mode - peach */
+    --frozen: #d6c178;        /* frozen runtime - mustard */
+    --warn: #d4a85a;
+    --good: #8fc9b0;
+    --danger: #d97a6c;
+    --mono: "JetBrains Mono", "SF Mono", "Menlo", "Consolas", monospace;
+    --sans: "Inter", "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
   body {
-    background:
-      radial-gradient(circle at 0% 0%, rgba(47, 106, 93, 0.08), transparent 30%),
-      radial-gradient(circle at 100% 0%, rgba(184, 92, 56, 0.09), transparent 34%),
-      linear-gradient(180deg, #f6efe5 0%, #eadfce 100%),
-      var(--bg);
-    color: var(--text);
-    font-family: "Aptos", "Segoe UI Variable", "Trebuchet MS", sans-serif;
-    padding: 20px;
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.4;
+    padding: 14px;
     min-height: 100vh;
   }
 
-  .mode-banner {
-    background: linear-gradient(180deg, rgba(255, 250, 242, 0.98), rgba(248, 241, 231, 0.98));
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 18px 20px;
-    margin-bottom: 16px;
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-    transition: border-color 0.2s;
-    box-shadow: var(--shadow);
+  /* ===== TOP STATUS STRIP ===== */
+  .strip {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto auto;
+    gap: 14px;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    margin-bottom: 12px;
   }
-  .mode-banner.AUTOPILOT { border-color: var(--accent); }
-  .mode-banner.TEACH { border-color: var(--human); }
-  .mode-banner.REVERSE_MANUAL { border-color: var(--warn); }
-  .mode-banner.PAUSED { border-color: var(--dim); }
-  .mode-banner.DATASET_COLLECTION { border-color: var(--good); }
 
-  .banner-main {
+  .strip-logo {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    color: var(--ink-dim);
+    border-right: 1px solid var(--rule);
+    padding-right: 14px;
+  }
+  .strip-logo b { color: var(--ink); font-weight: 600; }
+
+  .mode-readout {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .mode-readout .lbl {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    color: var(--ink-mute);
+    text-transform: uppercase;
+  }
+  .mode-readout .val {
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+  }
+  .mode-AUTOPILOT .val { color: var(--accent); }
+  .mode-TEACH .val { color: var(--teach); }
+  .mode-REVERSE_MANUAL .val { color: var(--warn); }
+  .mode-PAUSED .val { color: var(--ink-dim); }
+  .mode-DATASET_COLLECTION .val { color: var(--good); }
+
+  .strip-stat {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    flex: 1;
+    padding-left: 14px;
+    border-left: 1px solid var(--rule);
     min-width: 0;
   }
-
-  .banner-runtime-row {
-    display: flex;
-    gap: 12px;
-    align-items: stretch;
-    flex-wrap: wrap;
+  .strip-stat .lbl {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    color: var(--ink-mute);
+    text-transform: uppercase;
+    margin-bottom: 2px;
   }
-
-  .banner-tools {
-    display: flex;
-    align-items: flex-start;
+  .strip-stat .val {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 280px;
   }
+  .strip-stat .val.dim { color: var(--ink-dim); }
+  .strip-stat .val.frozen { color: var(--frozen); }
+  .strip-stat .val.online { color: var(--accent); }
 
-  .mode-banner h1 {
-    font-size: 22px;
+  .conn-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 10px;
     letter-spacing: 0.14em;
-    font-weight: 700;
+    color: var(--ink-mute);
+    text-transform: uppercase;
   }
-  .AUTOPILOT h1 { color: var(--accent); }
-  .TEACH h1 { color: var(--human); }
-  .REVERSE_MANUAL h1 { color: var(--warn); }
-  .PAUSED h1 { color: var(--dim); }
-  .DATASET_COLLECTION h1 { color: var(--good); }
+  .conn-dot {
+    width: 7px;
+    height: 7px;
+    background: var(--danger);
+  }
+  .conn-dot.ok { background: var(--good); }
+  .conn-pill.ok { color: var(--ink-dim); }
 
   .session-pill {
-    background: rgba(234, 223, 206, 0.92);
-    padding: 10px 14px;
-    border-radius: 12px;
-    font-size: 12px;
-    color: var(--dim);
-    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    color: var(--ink-mute);
+    text-transform: uppercase;
   }
   .session-pill input {
-    background: transparent;
-    border: none;
-    color: var(--text);
-    font-family: inherit;
-    font-size: 12px;
+    background: var(--bg-2);
+    border: 1px solid var(--rule);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 4px 6px;
     width: 140px;
-    margin-left: 8px;
   }
-  .session-pill input:focus { outline: none; color: var(--accent); }
+  .session-pill input:focus { outline: none; border-color: var(--ink-dim); }
 
+  /* ===== MAIN GRID ===== */
   .grid {
     display: grid;
-    grid-template-columns: 2fr 1fr;
-    gap: 16px;
-    max-width: 1400px;
+    grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+    gap: 12px;
+    max-width: 1500px;
     margin: 0 auto;
   }
 
-  .card {
-    background: linear-gradient(180deg, rgba(255, 251, 244, 0.98), rgba(248, 242, 234, 0.98));
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 16px;
-    box-shadow: var(--shadow);
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--rule);
   }
-
-  .video-card img {
-    width: 100%;
-    display: block;
-    border-radius: 12px;
-    background: #000;
-    border: 1px solid rgba(47, 106, 93, 0.28);
-  }
-
-  .steering-section {
-    margin-top: 12px;
-  }
-  .steering-label {
+  .panel-head {
     display: flex;
+    align-items: center;
     justify-content: space-between;
-    font-size: 11px;
-    color: var(--dim);
-    margin-bottom: 6px;
-  }
-  .steering-bar {
-    height: 28px;
-    background: var(--surface2);
-    border-radius: 999px;
-    position: relative;
-    overflow: hidden;
-  }
-  .steering-bar::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background: rgba(31, 42, 36, 0.16);
-  }
-  .steering-bar .base-fill,
-  .steering-bar .final-fill,
-  .steering-bar .selected-fill {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    transition: all 0.05s linear;
-  }
-  .base-fill { background: rgba(47, 106, 93, 0.24); }
-  .final-fill { background: var(--accent); }
-  .selected-fill { background: var(--human); height: 14px; top: 7px; }
-
-  .steering-value {
-    text-align: center;
-    font-size: 11px;
-    margin-top: 4px;
-    color: var(--dim);
-  }
-
-  h2 {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--panel-2);
+    font-family: var(--mono);
     font-size: 10px;
     letter-spacing: 0.18em;
     text-transform: uppercase;
-    color: var(--dim);
-    margin: 18px 0 10px 0;
-    font-weight: 600;
-    padding-bottom: 4px;
-    border-bottom: 1px solid var(--border);
+    color: var(--ink-dim);
   }
-  h2:first-child { margin-top: 0; }
+  .panel-head .meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-mute);
+    letter-spacing: 0.1em;
+  }
 
-  .stat {
-    display: flex;
-    justify-content: space-between;
-    padding: 5px 0;
-    font-size: 12px;
-    border-bottom: 1px solid var(--border);
-  }
-  .stat:last-child { border-bottom: none; }
-  .stat .label { color: var(--dim); }
-  .stat .value {
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-  }
-  .stat .value.warn { color: var(--warn); }
-  .stat .value.good { color: var(--good); }
-
-  .checkpoint-path {
-    margin-top: 6px;
-    padding: 8px 10px;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    font-size: 11px;
-    color: var(--dim);
-    line-height: 1.4;
-    word-break: break-all;
-  }
-  .checkpoint-path strong {
-    color: var(--text);
+  /* ===== VIDEO BLOCK ===== */
+  .video-block img {
     display: block;
-    margin-bottom: 4px;
+    width: 100%;
+    background: #000;
   }
 
-  .inline-control {
+  /* Steering bar lives directly under the video, no padding */
+  .steer-rail {
+    position: relative;
+    height: 36px;
+    background: var(--bg-2);
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+  }
+  .steer-rail::before, .steer-rail::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--rule);
+  }
+  .steer-rail::before { left: 50%; background: var(--rule-2); }
+  .steer-rail::after  { left: 25%; background: var(--rule); }
+  .steer-rail .q3 {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 75%;
+    width: 1px;
+    background: var(--rule);
+  }
+  .steer-fill {
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    transition: all 0.06s linear;
+  }
+  .steer-fill.base   { background: var(--ink-dim); opacity: 0.45; top: 4px; bottom: 4px; }
+  .steer-fill.final  { background: var(--accent); }
+  .steer-fill.select { background: var(--teach); top: 12px; bottom: 12px; }
+
+  .steer-tags {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr 1fr 1fr;
+    padding: 8px 12px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: var(--ink-mute);
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--rule);
+  }
+  .steer-tags .center { text-align: center; color: var(--accent); }
+  .steer-tags .right { text-align: right; }
+
+  .steer-numeric {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  .steer-numeric .cell { display: flex; flex-direction: column; gap: 2px; }
+  .steer-numeric .lbl {
+    font-size: 9px;
+    color: var(--ink-mute);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .steer-numeric .val { color: var(--ink); font-size: 14px; font-weight: 600; }
+  .steer-numeric .val.final { color: var(--accent); }
+  .steer-numeric .val.select { color: var(--teach); }
+
+  /* Two-column subblock for inference + adapter */
+  .video-sub {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-top: 0;
+  }
+  .video-sub > .subpanel {
+    border-right: 1px solid var(--rule);
+  }
+  .video-sub > .subpanel:last-child { border-right: none; }
+  .subpanel-body {
+    padding: 12px;
+  }
+
+  /* ===== KV LIST ===== */
+  .kv {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 6px;
-    margin-top: 8px;
-  }
-  .inline-control input,
-  .inline-control select {
-    width: 100%;
-    background: var(--surface2);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 9px 10px;
-    font-family: inherit;
-    font-size: 12px;
-  }
-  .inline-control input:focus,
-  .inline-control select:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-  .inline-control button {
-    padding: 9px 12px;
-    background: #fffaf3;
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    cursor: pointer;
-    font-family: inherit;
+    padding: 6px 0;
+    align-items: baseline;
+    border-bottom: 1px dashed var(--rule);
+    font-family: var(--mono);
     font-size: 11px;
-    letter-spacing: 0.08em;
-    transition: border-color 0.15s, transform 0.15s;
   }
-  .inline-control button:hover {
-    border-color: var(--accent);
-    transform: translateY(-1px);
-  }
-
-  .status-note {
-    margin-top: 8px;
-    padding: 8px 10px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--surface2);
-    color: var(--dim);
-    font-size: 11px;
-    line-height: 1.45;
-    display: none;
-  }
-  .status-note.show { display: block; }
-  .status-note.warn {
-    border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
-    color: var(--text);
-  }
-  .status-note.good {
-    border-color: color-mix(in srgb, var(--good) 55%, var(--border));
-    color: var(--text);
-  }
-
-  .runtime-pill {
-    padding: 12px 14px;
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    background: rgba(242, 233, 219, 0.96);
-    min-width: 280px;
-    flex: 1 1 280px;
-  }
-  .runtime-pill .label {
-    display: block;
+  .kv:last-child { border-bottom: none; }
+  .kv .k {
+    color: var(--ink-mute);
     font-size: 10px;
-    letter-spacing: 0.16em;
-    color: var(--dim);
-    text-transform: uppercase;
-    margin-bottom: 4px;
-  }
-  .runtime-pill .mode {
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-  }
-  .runtime-pill .target {
-    margin-top: 4px;
-    font-size: 11px;
-    color: var(--text);
-    opacity: 0.9;
-    word-break: break-all;
-  }
-  .runtime-pill.main .mode { color: var(--accent); }
-  .runtime-pill.frozen .mode { color: var(--warn); }
-
-  .speed-pill {
-    padding: 12px 14px;
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    background: rgba(242, 233, 219, 0.96);
-    min-width: 250px;
-    flex: 0 1 320px;
-  }
-  .speed-pill .label {
-    display: block;
-    font-size: 10px;
-    letter-spacing: 0.16em;
-    color: var(--dim);
-    text-transform: uppercase;
-    margin-bottom: 6px;
-  }
-  .speed-inline {
-    display: grid;
-    grid-template-columns: auto 88px auto;
-    gap: 8px;
-    align-items: center;
-  }
-  .speed-readout {
-    min-width: 48px;
-    padding: 8px 10px;
-    border-radius: 10px;
-    background: #fffaf3;
-    border: 1px solid var(--border);
-    font-size: 16px;
-    font-weight: 700;
-    text-align: center;
-    color: var(--accent);
-  }
-  .speed-inline input {
-    width: 100%;
-    background: #fffaf3;
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 9px 10px;
-    font-family: inherit;
-    font-size: 12px;
-  }
-  .speed-inline input:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-  .speed-inline button {
-    padding: 9px 12px;
-    background: #fffaf3;
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    transition: border-color 0.15s, transform 0.15s;
-  }
-  .speed-inline button:hover {
-    border-color: var(--accent);
-    transform: translateY(-1px);
-  }
-
-  .control-caption {
-    margin-top: 10px;
-    margin-bottom: 6px;
-    font-size: 10px;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--dim);
-  }
-
-  .helper-note {
-    margin-top: 6px;
-    font-size: 11px;
-    color: var(--dim);
-    line-height: 1.45;
-  }
-
-  .under-video-grid {
-    margin-top: 14px;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-  }
-  .compact-card {
-    padding: 14px;
-  }
-  .compact-card h2 {
-    margin-top: 0;
-  }
-
-  .mode-layout {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-  }
-  .mode-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .mode-switch {
-    padding: 12px 10px;
-    background: #fffaf3;
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 11px;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    transition: all 0.15s;
   }
-  .mode-switch:hover {
-    border-color: var(--accent);
-    transform: translateY(-1px);
+  .kv .v {
+    color: var(--ink);
+    font-weight: 600;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 220px;
   }
-  .mode-switch.active.MANUAL { background: var(--dim); color: #fffaf3; }
-  .mode-switch.active.AUTOPILOT { background: var(--accent); color: #fffaf3; border-color: var(--accent); }
-  .mode-switch.active.PAUSED { background: var(--warn); color: #fffaf3; border-color: var(--warn); }
-  .mode-switch.active.DATASET_COLLECTION { background: var(--good); color: #fffaf3; border-color: var(--good); }
-  .mode-switch.active.TEACH { background: var(--human); color: #fffaf3; border-color: var(--human); }
+  .kv .v.dim   { color: var(--ink-dim); font-weight: 500; }
+  .kv .v.good  { color: var(--good); }
+  .kv .v.warn  { color: var(--warn); }
+  .kv .v.frozen { color: var(--frozen); }
+  .kv .v.online { color: var(--accent); }
+  .kv.unit .u { color: var(--ink-mute); font-weight: 400; margin-left: 4px; font-size: 10px; }
 
-  .mode-subactions {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .mode-subactions button {
-    width: 100%;
-    padding: 10px 10px;
-    background: var(--surface2);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 11px;
-    text-align: left;
-    transition: border-color 0.15s, transform 0.15s;
-  }
-  .mode-subactions button:hover {
-    border-color: var(--human);
-    transform: translateY(-1px);
-  }
-  .mode-subactions .dataset-action:hover { border-color: var(--good); }
-  .mode-subactions .auto-action:hover { border-color: var(--warn); }
-
-  .action-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    margin-top: 10px;
-  }
-  .action-row button {
-    padding: 10px;
-    background: #fffaf3;
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 11px;
-    transition: border-color 0.15s, transform 0.15s;
-  }
-  .action-row button:hover {
-    border-color: var(--human);
-    transform: translateY(-1px);
-  }
-  .action-row .danger:hover { border-color: var(--danger); }
-
-  .keymap {
-    background: var(--surface2);
-    border-radius: 12px;
-    padding: 12px;
-    font-size: 11px;
-    color: var(--dim);
-    line-height: 1.7;
-    margin-top: 12px;
-  }
-  .keymap kbd {
-    background: #fffaf3;
-    padding: 1px 6px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 10px;
-    margin: 0 2px;
-  }
-  .keymap .row { padding: 2px 0; }
-
-  .conn-dot {
-    display: inline-block;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--danger);
-    margin-right: 8px;
-    vertical-align: middle;
-    animation: pulse 2s infinite;
-  }
-  .conn-dot.ok { background: var(--good); }
-  @keyframes pulse { 50% { opacity: 0.4; } }
-
-  .dial-container {
-    text-align: center;
-    margin: 12px 0;
-    padding: 14px;
-    background: var(--surface2);
-    border-radius: 12px;
-    display: none;
-  }
-  .dial-container.show { display: block; }
-  .dial-container .label {
-    font-size: 10px;
-    color: var(--dim);
+  /* ===== CONTROLS ===== */
+  .ctrl-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--ink-mute);
     text-transform: uppercase;
-    letter-spacing: 0.15em;
-    margin-bottom: 8px;
+    margin: 10px 0 4px;
   }
-  .dial-container .angle-value {
-    font-size: 32px;
-    font-weight: 700;
-    color: var(--human);
-    font-variant-numeric: tabular-nums;
+  .ctrl-row {
+    display: grid;
+    gap: 6px;
+    margin-top: 6px;
   }
-  .dial-container .angle-unit {
-    font-size: 14px;
-    color: var(--dim);
-    margin-left: 4px;
-  }
-  .dial-container .angle-norm {
+  .ctrl-row.two { grid-template-columns: 1fr auto; }
+  .ctrl-row.three { grid-template-columns: 1fr 1fr 1fr; }
+  .ctrl-row.one  { grid-template-columns: 1fr; }
+
+  input[type="text"], input[type="number"], select {
+    background: var(--bg-2);
+    border: 1px solid var(--rule);
+    color: var(--ink);
+    font-family: var(--mono);
     font-size: 11px;
-    color: var(--dim);
+    padding: 7px 8px;
+    width: 100%;
+    border-radius: 0;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--ink-dim); }
+  select:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  button {
+    background: var(--bg-2);
+    border: 1px solid var(--rule);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 7px 10px;
+    cursor: pointer;
+    border-radius: 0;
+    transition: border-color 0.1s, color 0.1s, background 0.1s;
+  }
+  button:hover {
+    border-color: var(--ink-dim);
+    color: var(--ink);
+  }
+  button:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+  button.primary  { color: var(--accent); border-color: rgba(143, 201, 176, 0.35); }
+  button.primary:hover  { background: rgba(143, 201, 176, 0.08); border-color: var(--accent); }
+  button.warn { color: var(--warn); border-color: rgba(212, 168, 90, 0.35); }
+  button.warn:hover { background: rgba(212, 168, 90, 0.08); border-color: var(--warn); }
+  button.danger { color: var(--danger); border-color: rgba(217, 122, 108, 0.35); }
+  button.danger:hover { background: rgba(217, 122, 108, 0.08); border-color: var(--danger); }
+  button.teach { color: var(--teach); border-color: rgba(232, 168, 124, 0.35); }
+  button.teach:hover { background: rgba(232, 168, 124, 0.08); border-color: var(--teach); }
+  button.good { color: var(--good); border-color: rgba(143, 201, 176, 0.35); }
+  button.good:hover { background: rgba(143, 201, 176, 0.08); border-color: var(--good); }
+
+  .helper {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-mute);
+    line-height: 1.5;
     margin-top: 4px;
   }
 
-  .loss-history {
-    height: 32px;
-    background: var(--surface2);
-    border-radius: 12px;
-    margin: 6px 0;
+  .note {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--rule);
+    background: var(--bg-2);
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-dim);
+    line-height: 1.5;
+    display: none;
+  }
+  .note.show { display: block; }
+  .note.warn { border-color: var(--warn); color: var(--ink); }
+  .note.good { border-color: var(--good); color: var(--ink); }
+
+  /* ===== MODE GRID ===== */
+  .mode-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    padding: 1px;
+    background: var(--rule);
+  }
+  .mode-cell {
+    background: var(--panel);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .mode-btn {
+    width: 100%;
+    padding: 14px 8px;
+    background: var(--bg-2);
+    border: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    text-align: left;
+    color: var(--ink);
+    cursor: pointer;
+    transition: border-color 0.1s, background 0.1s;
     position: relative;
-    overflow: hidden;
+  }
+  .mode-btn::before {
+    content: attr(data-key);
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    font-size: 9px;
+    color: var(--ink-mute);
+    letter-spacing: 0;
+  }
+  .mode-btn .sub {
+    display: block;
+    margin-top: 4px;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    color: var(--ink-mute);
+    text-transform: uppercase;
+  }
+  .mode-btn:hover { border-color: var(--ink-dim); }
+  .mode-btn.PAUSED.active { background: var(--ink-dim); color: var(--bg); border-color: var(--ink-dim); }
+  .mode-btn.AUTOPILOT.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .mode-btn.TEACH.active { background: var(--teach); color: var(--bg); border-color: var(--teach); }
+  .mode-btn.DATASET_COLLECTION.active { background: var(--good); color: var(--bg); border-color: var(--good); }
+  .mode-btn.PAUSED.active .sub,
+  .mode-btn.AUTOPILOT.active .sub,
+  .mode-btn.TEACH.active .sub,
+  .mode-btn.DATASET_COLLECTION.active .sub { color: rgba(0, 0, 0, 0.55); }
+
+  .mode-subbtns {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .mode-subbtn {
+    padding: 6px 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-align: left;
+    background: transparent;
+    border: 1px solid var(--rule);
+    color: var(--ink-dim);
+    text-transform: none;
+  }
+  .mode-subbtn:hover { color: var(--ink); border-color: var(--ink-dim); }
+
+  /* ===== TEACH DIAL ===== */
+  .dial {
+    display: none;
+    padding: 12px;
+    border-top: 1px solid var(--rule);
+    background: var(--bg-2);
+    text-align: center;
+  }
+  .dial.show { display: block; }
+  .dial .lbl {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--ink-mute);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .dial .val {
+    font-family: var(--mono);
+    font-size: 30px;
+    font-weight: 600;
+    color: var(--teach);
+  }
+  .dial .val .unit { font-size: 14px; color: var(--ink-mute); margin-left: 4px; }
+  .dial .norm {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-mute);
+    margin-top: 4px;
+    letter-spacing: 0.08em;
   }
 
-  #uiActionStatus {
-    margin-top: 10px;
+  /* ===== KEYS ===== */
+  .keys {
+    padding: 12px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-dim);
+    line-height: 1.7;
+  }
+  .keys .grp {
+    margin-bottom: 8px;
+  }
+  .keys .grp:last-child { margin-bottom: 0; }
+  .keys .grp h4 {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+  kbd {
+    display: inline-block;
+    background: var(--bg);
+    color: var(--ink);
+    padding: 1px 6px;
+    border: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 10px;
+    margin: 0 1px;
+    line-height: 1.2;
   }
 
-  @media (max-width: 980px) {
-    .grid {
-      grid-template-columns: 1fr;
+  /* ===== UTILITIES ===== */
+  .body-pad { padding: 12px; }
+  .divider {
+    border-top: 1px solid var(--rule);
+    margin: 10px 0;
+  }
+
+  @media (max-width: 1000px) {
+    .grid { grid-template-columns: 1fr; }
+    .strip {
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
     }
-    .mode-banner {
-      flex-direction: column;
-    }
-    .banner-tools {
-      width: 100%;
-    }
-    .session-pill {
-      width: 100%;
-    }
-    .under-video-grid {
-      grid-template-columns: 1fr;
-    }
-    .mode-layout {
-      grid-template-columns: 1fr;
-    }
-    .speed-inline {
-      grid-template-columns: 1fr;
-    }
+    .strip-stat { border-left: none; padding-left: 0; }
+    .video-sub { grid-template-columns: 1fr; }
+    .video-sub > .subpanel { border-right: none; border-bottom: 1px solid var(--rule); }
   }
 </style>
 </head>
 <body>
 
-<!-- MODE BANNER -->
-<div class="mode-banner PAUSED" id="modeBanner">
-  <div class="banner-main">
-    <div>
-      <span class="conn-dot" id="connDot"></span>
-      <h1 id="modeTitle" style="display: inline-block;">PAUSED</h1>
-    </div>
-    <div class="banner-runtime-row">
-      <div class="runtime-pill main" id="runtimePill">
-        <span class="label">Selected Active Runtime</span>
-        <div class="mode" id="runtimeModeVal">ONLINE LEARNING MODEL (FCA)</div>
-        <div class="target" id="runtimeTargetVal">policy: —</div>
-      </div>
-      <div class="speed-pill">
-        <span class="label">Max Auto Speed</span>
-        <div class="speed-inline">
-          <div class="speed-readout"><span id="maxSpeedVal">35</span></div>
-          <input type="number" id="maxSpeedInput" min="0" max="100" step="1" value="35">
-          <button onclick="applyMaxSpeed()">SET SPEED</button>
-        </div>
-      </div>
-    </div>
+<!-- ============================================================ -->
+<!-- STATUS STRIP                                                 -->
+<!-- ============================================================ -->
+<div class="strip mode-PAUSED" id="strip">
+  <div class="strip-logo">FCA · <b>OPERATOR</b></div>
+
+  <div class="mode-readout">
+    <span class="lbl">Mode</span>
+    <span class="val" id="modeTitle">PAUSED</span>
   </div>
-  <div class="banner-tools">
-    <div class="session-pill">
-      SESSION: <input type="text" id="sessionInput" value="default"
-                      onchange="setSession(this.value)">
-    </div>
+
+  <div class="strip-stat">
+    <span class="lbl">Runtime</span>
+    <span class="val online" id="runtimeReadout">ONLINE FCA</span>
+  </div>
+
+  <div class="strip-stat">
+    <span class="lbl">Target</span>
+    <span class="val dim" id="runtimeTarget">policy: —</span>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-end;">
+    <span class="conn-pill" id="connPill">
+      <span class="conn-dot" id="connDot"></span><span id="connText">Disconnected</span>
+    </span>
+    <span class="session-pill">
+      SESSION
+      <input type="text" id="sessionInput" value="default" onchange="setSession(this.value)">
+    </span>
   </div>
 </div>
 
+<!-- ============================================================ -->
+<!-- MAIN GRID                                                    -->
+<!-- ============================================================ -->
 <div class="grid">
-  <!-- LEFT COLUMN: Video + Steering -->
-  <div class="card video-card">
+
+  <!-- ====== LEFT COLUMN: video + steering + sub-panels ====== -->
+  <div class="panel video-block">
+    <div class="panel-head">
+      <span>Camera Feed</span>
+      <span class="meta" id="cameraMeta">320 × 240 · live</span>
+    </div>
+
     <img src="/video_feed" alt="camera">
 
-    <!-- Steering: shows base, final, and (in teach) selected -->
-    <div class="steering-section">
-      <div class="steering-label">
-        <span>← LEFT</span>
-        <span style="color: var(--accent);">model</span>
-        <span>RIGHT →</span>
+    <div class="steer-rail">
+      <div class="q3"></div>
+      <div class="steer-fill base"   id="baseFill"></div>
+      <div class="steer-fill final"  id="finalFill"></div>
+      <div class="steer-fill select" id="selectedFill" style="display: none;"></div>
+    </div>
+
+    <div class="steer-tags">
+      <span>← left</span>
+      <span class="center">steering</span>
+      <span class="right">right →</span>
+    </div>
+
+    <div class="steer-numeric">
+      <div class="cell">
+        <span class="lbl">Base</span>
+        <span class="val" id="baseAngleVal">90°</span>
       </div>
-      <div class="steering-bar">
-        <div class="base-fill"  id="baseFill"></div>
-        <div class="final-fill" id="finalFill"></div>
-        <div class="selected-fill" id="selectedFill" style="display: none;"></div>
+      <div class="cell">
+        <span class="lbl">Final</span>
+        <span class="val final" id="finalAngleVal">90°</span>
       </div>
-      <div class="steering-value">
-        base <span id="baseAngleVal">90</span>° → 
-        final <span id="finalAngleVal" style="color: var(--accent);">90</span>°
-        (Δ <span id="deltaAngleVal">0.000</span>)
+      <div class="cell">
+        <span class="lbl">Δ</span>
+        <span class="val" id="deltaAngleVal">0.000</span>
+      </div>
+      <div class="cell">
+        <span class="lbl">Selected</span>
+        <span class="val select" id="selectedShort">—</span>
       </div>
     </div>
 
-    <!-- Selected angle dial (only visible in teach) -->
-    <div class="dial-container" id="dialContainer">
-      <div class="label">Selected angle</div>
-      <div>
-        <span class="angle-value" id="selectedAngleValue">90</span><span class="angle-unit">°</span>
+    <div class="dial" id="dialContainer">
+      <div class="lbl">selected angle</div>
+      <div class="val">
+        <span id="selectedAngleValue">90</span><span class="unit">°</span>
       </div>
-      <div class="angle-norm" id="selectedAngleNorm">norm: 0.500</div>
+      <div class="norm" id="selectedAngleNorm">norm: 0.500</div>
     </div>
 
-    <div class="under-video-grid">
-      <div class="card compact-card">
-        <h2>Inference</h2>
-        <div class="stat"><span class="label">Active backend</span>
-          <span class="value" id="inferenceBackendVal">Online learning model (FCA)</span></div>
-        <div class="stat"><span class="label">Frozen runtime</span>
-          <span class="value" id="frozenBackendVal">—</span></div>
-        <div class="control-caption">Selected active runtime</div>
-        <div class="inline-control">
-          <select id="inferenceBackendSelect" onchange="applyInferenceBackend()">
-            <option value="main">ONLINE LEARNING MODEL (FCA)</option>
-            <option value="frozen">FROZEN MODEL</option>
-          </select>
-          <button onclick="applyInferenceBackend()">APPLY</button>
+    <!-- ===== Inference + Adapter side-by-side ===== -->
+    <div class="video-sub">
+      <div class="subpanel">
+        <div class="panel-head">
+          <span>Inference</span>
+          <span class="meta" id="inferenceMeta">—</span>
         </div>
-        <div class="inline-control" style="grid-template-columns: 1fr;">
-          <input type="text" id="frozenModelInput" placeholder="Frozen model path (.tflite / .keras / .h5)">
+        <div class="subpanel-body">
+          <div class="kv"><span class="k">Active backend</span><span class="v online" id="inferenceBackendVal">Online (FCA)</span></div>
+          <div class="kv"><span class="k">Frozen runtime</span><span class="v dim" id="frozenBackendVal">—</span></div>
+
+          <div class="ctrl-label">Selected runtime</div>
+          <div class="ctrl-row two">
+            <select id="inferenceBackendSelect" onchange="applyInferenceBackend()">
+              <option value="main">ONLINE (FCA)</option>
+              <option value="frozen">FROZEN</option>
+            </select>
+            <button class="primary" onclick="applyInferenceBackend()">Apply</button>
+          </div>
+          <div class="ctrl-label">Online learning paradigm</div>
+          <div class="kv"><span class="k">Active paradigm</span><span class="v" id="learningParadigmVal">—</span></div>
+          <div class="ctrl-row two">
+            <select id="learningParadigmSelect" onchange="applyLearningParadigm()"></select>
+            <button id="learningParadigmApplyBtn" class="primary" onclick="applyLearningParadigm()">Apply</button>
+          </div>
+          <div class="helper" id="learningParadigmHelper">Switch to ONLINE (FCA) to change deep learning paradigms.</div>
+          <div class="ctrl-row one">
+            <input type="text" id="frozenModelInput" placeholder=".tflite / .keras / .h5 path">
+          </div>
+          <div class="helper">Required for frozen runtime.</div>
+          <div class="note" id="teachWarningNote"></div>
         </div>
-        <div class="helper-note">Specify frozen model path for frozen model mode.</div>
-        <div class="status-note" id="teachWarningNote"></div>
       </div>
 
-      <div class="card compact-card">
-        <h2>Adapter</h2>
-        <div class="stat"><span class="label">Policy head</span>
-          <span class="value" id="policyHeadVal">—</span></div>
-        <div class="inline-control">
-          <select id="policyHeadSelect" onchange="applyPolicyHead()"></select>
-          <button id="policyHeadApplyBtn" onclick="applyPolicyHead()">LOAD HEAD</button>
+      <div class="subpanel">
+        <div class="panel-head">
+          <span>Adapter</span>
+          <span class="meta" id="adapterMeta">—</span>
         </div>
-        <div class="action-row">
-          <button onclick="saveCheckpoint()">💾 Save</button>
-          <button class="danger" onclick="resetAdapter()">↺ Reset weights</button>
+        <div class="subpanel-body">
+          <div class="kv"><span class="k">Policy head</span><span class="v" id="policyHeadVal">—</span></div>
+          <div class="ctrl-row two">
+            <select id="policyHeadSelect" onchange="applyPolicyHead()"></select>
+            <button id="policyHeadApplyBtn" class="primary" onclick="applyPolicyHead()">Load</button>
+          </div>
+          <div class="ctrl-row two" style="margin-top: 6px;">
+            <button class="good" onclick="saveCheckpoint()">Save</button>
+            <button class="danger" onclick="resetAdapter()">Reset</button>
+          </div>
+          <div class="kv" style="margin-top: 6px;"><span class="k">Last save</span><span class="v dim" id="checkpointSaveVal">Never</span></div>
+          <div class="kv"><span class="k">Path</span><span class="v dim" id="checkpointPathVal" style="max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">—</span></div>
+          <div class="note" id="uiActionStatus"></div>
         </div>
-        <div class="stat"><span class="label">Last manual save</span>
-          <span class="value" id="checkpointSaveVal">Never</span></div>
-        <div class="checkpoint-path">
-          <strong>Checkpoint path</strong>
-          <span id="checkpointPathVal">—</span>
-        </div>
-        <div class="status-note" id="uiActionStatus"></div>
       </div>
     </div>
   </div>
 
-  <!-- RIGHT COLUMN: Telemetry + Controls -->
-  <div class="card">
-    <h2>Mode</h2>
-    <div class="mode-layout">
-      <div class="mode-panel">
-        <button id="btn-PAUSED" class="mode-switch PAUSED" onclick="setMode('PAUSED')">Pause</button>
+  <!-- ====== RIGHT COLUMN: controls + telemetry ====== -->
+  <div style="display: flex; flex-direction: column; gap: 12px;">
+
+    <!-- MODE -->
+    <div class="panel">
+      <div class="panel-head">
+        <span>Mode</span>
+        <span class="meta">space · emergency pause</span>
       </div>
-      <div class="mode-panel">
-        <button id="btn-AUTOPILOT" class="mode-switch AUTOPILOT" onclick="setMode('AUTOPILOT')">Auto</button>
-        <div class="mode-subactions">
-          <button class="auto-action" onclick="rewindAutopilot()">Reverse mode (Q)</button>
+      <div class="mode-grid">
+        <div class="mode-cell">
+          <button id="btn-PAUSED" class="mode-btn PAUSED" data-key="1" onclick="setMode('PAUSED')">Pause<span class="sub">stop motors</span></button>
         </div>
-      </div>
-      <div class="mode-panel">
-        <button id="btn-TEACH" class="mode-switch TEACH" onclick="setMode('TEACH')">Teach</button>
-        <div class="mode-subactions">
-          <button onclick="teachStopLabel()">Teach stop label (X)</button>
+        <div class="mode-cell">
+          <button id="btn-AUTOPILOT" class="mode-btn AUTOPILOT" data-key="2" onclick="setMode('AUTOPILOT')">Auto<span class="sub">infer & drive</span></button>
+          <div class="mode-subbtns">
+            <button class="mode-subbtn" onclick="rewindAutopilot()">[Q] Reverse manual</button>
+          </div>
         </div>
-      </div>
-      <div class="mode-panel">
-        <button id="btn-DATASET_COLLECTION" class="mode-switch DATASET_COLLECTION" onclick="setMode('DATASET_COLLECTION')">Dataset collection</button>
-        <div class="mode-subactions">
-          <button class="dataset-action" onclick="datasetCaptureStopFrame()">Capture stop frame (C)</button>
-          <button class="dataset-action" onclick="datasetStop()">Dataset stop (Z)</button>
-          <button class="dataset-action" onclick="datasetResume()">Dataset resume (V)</button>
+        <div class="mode-cell">
+          <button id="btn-TEACH" class="mode-btn TEACH" data-key="3" onclick="setMode('TEACH')">Teach<span class="sub">corrective demo</span></button>
+          <div class="mode-subbtns">
+            <button class="mode-subbtn" onclick="teachStopLabel()">[X] Teach stop label</button>
+          </div>
+        </div>
+        <div class="mode-cell">
+          <button id="btn-DATASET_COLLECTION" class="mode-btn DATASET_COLLECTION" data-key="4" onclick="setMode('DATASET_COLLECTION')">Dataset<span class="sub">offline capture</span></button>
+          <div class="mode-subbtns">
+            <button class="mode-subbtn" onclick="datasetCaptureStopFrame()">[C] Capture stop frame</button>
+            <button class="mode-subbtn" onclick="datasetStop()">[Z] Dataset stop</button>
+            <button class="mode-subbtn" onclick="datasetResume()">[V] Dataset resume</button>
+          </div>
         </div>
       </div>
     </div>
 
-    <h2>Performance</h2>
-    <div class="stat"><span class="label">FPS</span>
-      <span class="value" id="fpsVal">0</span></div>
-    <div class="stat"><span class="label">Feature</span>
-      <span class="value" id="featureVal">0</span> <span class="label">ms</span></div>
-    <div class="stat"><span class="label">Inference</span>
-      <span class="value" id="inferenceVal">0</span> <span class="label">ms</span></div>
-    <div class="stat"><span class="label">Adapter</span>
-      <span class="value" id="adapterVal">0</span> <span class="label">ms</span></div>
-    <div class="stat"><span class="label">Loop total</span>
-      <span class="value" id="loopVal">0</span> <span class="label">ms</span></div>
-    <div class="stat"><span class="label">Other overhead</span>
-      <span class="value" id="otherVal">0</span> <span class="label">ms</span></div>
+    <!-- MAX SPEED -->
+    <div class="panel">
+      <div class="panel-head">
+        <span>Max Auto Speed</span>
+        <span class="meta" id="maxSpeedMeta">—</span>
+      </div>
+      <div class="body-pad">
+        <div class="ctrl-row three" style="align-items: center;">
+          <div style="display: flex; align-items: baseline; gap: 6px;">
+            <span class="lbl" style="font-family: var(--mono); font-size: 9px; color: var(--ink-mute); letter-spacing: 0.16em; text-transform: uppercase;">Current</span>
+            <span style="font-family: var(--mono); font-size: 24px; font-weight: 600; color: var(--accent);" id="maxSpeedVal">35</span>
+          </div>
+          <input type="number" id="maxSpeedInput" min="0" max="100" step="1" value="35">
+          <button class="primary" onclick="applyMaxSpeed()">Set</button>
+        </div>
+      </div>
+    </div>
 
-    <h2>Learning</h2>
-    <div class="stat"><span class="label">Total updates</span>
-      <span class="value" id="updatesVal">0</span></div>
-    <div class="stat"><span class="label">Replay buffer</span>
-      <span class="value" id="bufferVal">0</span></div>
-    <div class="stat"><span class="label">Recent loss</span>
-      <span class="value" id="lossVal">—</span></div>
-    <div class="stat"><span class="label">Corrections</span>
-      <span class="value" id="correctionsVal">0</span></div>
+    <!-- PERF -->
+    <div class="panel">
+      <div class="panel-head">
+        <span>Performance</span>
+        <span class="meta"><span id="fpsVal">0</span> fps</span>
+      </div>
+      <div class="body-pad">
+        <div class="kv unit"><span class="k">Camera</span><span class="v"><span id="cameraVal">0</span><span class="u">ms</span></span></div>
+        <div class="kv unit"><span class="k">Preview encode</span><span class="v"><span id="previewVal">0</span><span class="u">ms</span></span></div>
+        <div class="kv unit"><span class="k">Feature</span><span class="v"><span id="featureVal">0</span><span class="u">ms</span></span></div>
+        <div class="kv unit"><span class="k">Inference</span><span class="v"><span id="inferenceVal">0</span><span class="u">ms</span></span></div>
+        <div class="kv unit"><span class="k">Adapter</span><span class="v"><span id="adapterVal">0</span><span class="u">ms</span></span></div>
+        <div class="kv unit"><span class="k">Control</span><span class="v"><span id="controlVal">0</span><span class="u">ms</span></span></div>
+        <div class="kv unit"><span class="k">Logging</span><span class="v"><span id="loggingVal">0</span><span class="u">ms</span></span></div>
+        <div class="kv unit"><span class="k">Loop total</span><span class="v" style="color: var(--accent);"><span id="loopVal">0</span><span class="u">ms</span></span></div>
+        <div class="kv unit"><span class="k">Unattributed</span><span class="v dim"><span id="otherVal">0</span><span class="u">ms</span></span></div>
+      </div>
+    </div>
 
-    <h2>Keys</h2>
-    <div class="keymap">
-      <div class="row"><strong style="color:var(--text);">TEACH MODE</strong></div>
-      <div class="row"><kbd>A</kbd>/<kbd>D</kbd> adjust angle  <kbd>S</kbd> centre</div>
-      <div class="row"><kbd>W</kbd> forward step  <kbd>⇧W</kbd> long step</div>
-      <div class="row"><kbd>X</kbd> stop label  <kbd>B</kbd> backward (no learn)</div>
-      <div class="row"><kbd>R</kbd> resume autopilot</div>
-      <div class="row" style="margin-top:6px;"><strong style="color:var(--text);">AUTOPILOT</strong></div>
-      <div class="row"><kbd>Q</kbd> reverse manual mode  <kbd>T</kbd> teach</div>
-      <div class="row" style="margin-top:6px;"><strong style="color:var(--text);">ALWAYS</strong></div>
-      <div class="row"><kbd>1</kbd> pause  <kbd>2</kbd> auto  <kbd>3</kbd> teach  <kbd>4</kbd> dataset collection</div>
-      <div class="row"><kbd>Space</kbd> emergency pause</div>
-      <div class="row"><kbd>Z</kbd> dataset stop  <kbd>C</kbd> capture stop frame  <kbd>V</kbd> dataset resume</div>
-      <div class="row"><kbd>0</kbd> reset adapter  <kbd>P</kbd> save checkpoint</div>
+    <!-- LEARNING -->
+    <div class="panel">
+      <div class="panel-head">
+        <span>Learning</span>
+        <span class="meta" id="learningMeta">—</span>
+      </div>
+      <div class="body-pad">
+        <div class="kv"><span class="k">Total updates</span><span class="v" id="updatesVal">0</span></div>
+        <div class="kv"><span class="k">Avg step latency</span><span class="v dim"><span id="learningStepAvgVal">0</span> ms</span></div>
+        <div class="kv"><span class="k">Auto frame logs</span><span class="v dim" id="autopilotLoggingVal">Off</span></div>
+        <div class="kv"><span class="k">Replay buffer</span><span class="v" id="bufferVal">0</span></div>
+        <div class="kv"><span class="k">Replay data</span><span class="v dim" id="bufferBytesVal">0 B</span></div>
+        <div class="kv"><span class="k">Recent loss</span><span class="v" id="lossVal">—</span></div>
+        <div class="kv"><span class="k">Corrections</span><span class="v" id="correctionsVal">0</span></div>
+        <div class="ctrl-row one" style="margin-top: 8px;">
+          <button id="autopilotLoggingBtn" class="primary" onclick="toggleAutopilotFrameLogging()">Enable auto frame logs</button>
+        </div>
+        <div class="helper">Enable this before AUTOPILOT evaluation runs to write frame CSV rows under logs/ with MoE gate and intent fields. TEACH correction CSVs are written per session already.</div>
+      </div>
+    </div>
+
+    <!-- KEYS -->
+    <div class="panel">
+      <div class="panel-head">
+        <span>Keys</span>
+        <span class="meta">always</span>
+      </div>
+      <div class="keys">
+        <div class="grp">
+          <h4>Teach mode</h4>
+          <kbd>A</kbd>/<kbd>D</kbd> adjust · <kbd>S</kbd> centre<br>
+          <kbd>W</kbd> step · <kbd>⇧W</kbd> long step<br>
+          <kbd>X</kbd> stop label · <kbd>B</kbd> backward (no learn)<br>
+          <kbd>R</kbd> back to autopilot
+        </div>
+        <div class="grp">
+          <h4>Autopilot</h4>
+          <kbd>Q</kbd> reverse manual · <kbd>T</kbd> teach
+        </div>
+        <div class="grp">
+          <h4>Always</h4>
+          <kbd>1</kbd> pause · <kbd>2</kbd> auto · <kbd>3</kbd> teach · <kbd>4</kbd> dataset<br>
+          <kbd>Space</kbd> emergency pause<br>
+          <kbd>Z</kbd>/<kbd>V</kbd> dataset stop/resume · <kbd>C</kbd> capture stop frame<br>
+          <kbd>0</kbd> reset adapter · <kbd>P</kbd> save checkpoint · <kbd>M</kbd> mark event
+        </div>
+      </div>
     </div>
   </div>
 </div>
 
 <script>
+// ===== Script identical to your existing version, with small DOM ID updates =====
 let ws = null;
 let reconnectTimer = null;
 let currentMode = 'PAUSED';
 let backwardHoldActive = false;
 let latestTelemetry = null;
 let pendingMaxSpeed = null;
+let pendingAutopilotFrameLogging = null;
 let pendingInferenceBackend = null;
+let pendingLearningParadigm = null;
 let pendingPolicyHead = null;
 let pendingFrozenPath = null;
 const PENDING_TTL_MS = 2500;
 
-function basename(path) {
-  if (!path) return '';
-  const normalized = String(path).replace(/\\\\/g, '/');
-  const parts = normalized.split('/');
-  return parts[parts.length - 1] || normalized;
+function basename(p) {
+  if (!p) return '';
+  const n = String(p).replace(/\\\\/g, '/');
+  const parts = n.split('/');
+  return parts[parts.length - 1] || n;
 }
 
 function setUiActionStatus(message, kind = 'warn') {
@@ -792,35 +847,39 @@ function setUiActionStatus(message, kind = 'warn') {
   el.textContent = message;
   el.classList.add('show');
   el.classList.remove('warn', 'good');
-  if (kind === 'good') el.classList.add('good');
-  else el.classList.add('warn');
+  el.classList.add(kind === 'good' ? 'good' : 'warn');
 }
-
-function markActionPending(message) {
-  setUiActionStatus(message, 'warn');
-}
-
-function isPendingFresh(pending) {
-  return pending && (Date.now() - pending.atMs) < PENDING_TTL_MS;
+function markActionPending(message) { setUiActionStatus(message, 'warn'); }
+function isPendingFresh(p) { return p && (Date.now() - p.atMs) < PENDING_TTL_MS; }
+function formatBytes(b) {
+  const v = Number(b) || 0;
+  if (v < 1024) return `${v} B`;
+  if (v < 1024 * 1024) return `${(v/1024).toFixed(1)} KB`;
+  return `${(v/(1024*1024)).toFixed(2)} MB`;
 }
 
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
-
   ws.onopen = () => {
-    document.getElementById('connDot').classList.add('ok');
+    const dot = document.getElementById('connDot');
+    const pill = document.getElementById('connPill');
+    const txt = document.getElementById('connText');
+    dot.classList.add('ok');
+    pill.classList.add('ok');
+    txt.textContent = 'Connected';
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   };
-
   ws.onclose = () => {
-    document.getElementById('connDot').classList.remove('ok');
-    if (!reconnectTimer) {
-      reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 1500);
-    }
+    const dot = document.getElementById('connDot');
+    const pill = document.getElementById('connPill');
+    const txt = document.getElementById('connText');
+    dot.classList.remove('ok');
+    pill.classList.remove('ok');
+    txt.textContent = 'Disconnected';
+    if (!reconnectTimer) reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 1500);
   };
-
-  ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
     if (data.type === 'telemetry') updateTelemetry(data);
   };
 }
@@ -829,34 +888,35 @@ connect();
 function updateTelemetry(d) {
   latestTelemetry = d;
 
-  // Mode banner
-  const banner = document.getElementById('modeBanner');
-  banner.classList.remove('AUTOPILOT', 'TEACH', 'REVERSE_MANUAL', 'PAUSED', 'DATASET_COLLECTION');
-  banner.classList.add(d.mode);
+  // Mode strip + readout
+  const strip = document.getElementById('strip');
+  strip.classList.remove('mode-AUTOPILOT', 'mode-TEACH', 'mode-REVERSE_MANUAL', 'mode-PAUSED', 'mode-DATASET_COLLECTION');
+  strip.classList.add('mode-' + d.mode);
   document.getElementById('modeTitle').textContent = d.mode;
   currentMode = d.mode;
 
-  // Highlight active mode button
   ['PAUSED','AUTOPILOT','TEACH','DATASET_COLLECTION'].forEach(m => {
     const btn = document.getElementById('btn-' + m);
     if (btn) btn.classList.toggle('active', d.mode === m);
   });
 
   // Steering bars
-  const baseAngleNorm = d.base_angle_norm;            // [0,1], 0.5 = straight
+  const baseAngleNorm = d.base_angle_norm;
   const finalAngleCar = d.final_angle_car;
-  const finalAngleNorm = (finalAngleCar - 50) / 80;   // back to [0,1]
+  const finalAngleNorm = (finalAngleCar - 50) / 80;
   const selectedNorm = (d.selected_angle_car - 50) / 80;
 
   setBar('baseFill',  baseAngleNorm);
   setBar('finalFill', finalAngleNorm);
   setBar('selectedFill', selectedNorm);
 
-  document.getElementById('baseAngleVal').textContent  = (baseAngleNorm*80+50).toFixed(0);
-  document.getElementById('finalAngleVal').textContent = finalAngleCar.toFixed(0);
+  document.getElementById('baseAngleVal').textContent  = (baseAngleNorm*80+50).toFixed(0) + '°';
+  document.getElementById('finalAngleVal').textContent = finalAngleCar.toFixed(0) + '°';
   document.getElementById('deltaAngleVal').textContent = d.delta_angle_norm.toFixed(3);
+  document.getElementById('selectedShort').textContent = (d.mode === 'TEACH' || d.mode === 'DATASET_COLLECTION' || d.mode === 'REVERSE_MANUAL')
+    ? d.selected_angle_car.toFixed(0) + '°' : '—';
 
-  // Selected dial — show in teach-like steering modes
+  // Dial visibility
   const dial = document.getElementById('dialContainer');
   if (d.mode === 'TEACH' || d.mode === 'DATASET_COLLECTION' || d.mode === 'REVERSE_MANUAL') {
     dial.classList.add('show');
@@ -868,19 +928,42 @@ function updateTelemetry(d) {
   document.getElementById('selectedAngleValue').textContent = d.selected_angle_car.toFixed(0);
   document.getElementById('selectedAngleNorm').textContent = 'norm: ' + selectedNorm.toFixed(3);
 
-  // Performance
+  // Perf
   document.getElementById('fpsVal').textContent       = d.fps;
+  document.getElementById('cameraVal').textContent    = d.camera_ms;
+  document.getElementById('previewVal').textContent   = d.preview_ms;
   document.getElementById('featureVal').textContent   = d.feature_ms;
   document.getElementById('inferenceVal').textContent = d.inference_ms;
   document.getElementById('adapterVal').textContent   = d.adapter_ms;
+  document.getElementById('controlVal').textContent   = d.control_ms;
+  document.getElementById('loggingVal').textContent   = d.logging_ms;
   document.getElementById('loopVal').textContent      = d.loop_ms;
   document.getElementById('otherVal').textContent     = d.other_ms;
 
   // Learning
   document.getElementById('updatesVal').textContent     = d.total_updates;
+  document.getElementById('learningStepAvgVal').textContent = (Number(d.avg_learning_step_ms) || 0).toFixed(2);
+  const autopilotLoggingVal = document.getElementById('autopilotLoggingVal');
+  const autopilotLoggingBtn = document.getElementById('autopilotLoggingBtn');
+  const autopilotLoggingEnabled = !!d.autopilot_frame_logging;
+  autopilotLoggingVal.textContent = autopilotLoggingEnabled ? 'On' : 'Off';
+  autopilotLoggingVal.classList.toggle('good', autopilotLoggingEnabled);
+  autopilotLoggingVal.classList.toggle('dim', !autopilotLoggingEnabled);
+  if (autopilotLoggingBtn) {
+    autopilotLoggingBtn.textContent = autopilotLoggingEnabled ? 'Disable auto frame logs' : 'Enable auto frame logs';
+    autopilotLoggingBtn.classList.toggle('warn', autopilotLoggingEnabled);
+    autopilotLoggingBtn.classList.toggle('primary', !autopilotLoggingEnabled);
+  }
+  if (pendingAutopilotFrameLogging && autopilotLoggingEnabled === pendingAutopilotFrameLogging.value) {
+    pendingAutopilotFrameLogging = null;
+    setUiActionStatus(`AUTOPILOT frame logging ${autopilotLoggingEnabled ? 'enabled' : 'disabled'}.`, 'good');
+  }
   document.getElementById('bufferVal').textContent      = d.replay_buffer_size;
+  document.getElementById('bufferBytesVal').textContent = formatBytes(d.replay_buffer_bytes);
   document.getElementById('lossVal').textContent        = d.last_teach_loss > 0 ? d.last_teach_loss.toFixed(5) : '—';
   document.getElementById('correctionsVal').textContent = d.corrections_logged;
+
+  // Max speed
   document.getElementById('maxSpeedVal').textContent    = d.max_speed;
   const maxSpeedInput = document.getElementById('maxSpeedInput');
   if (pendingMaxSpeed && d.max_speed === pendingMaxSpeed.value) {
@@ -888,34 +971,33 @@ function updateTelemetry(d) {
     setUiActionStatus('Max speed updated.', 'good');
   }
   const displayMaxSpeed = isPendingFresh(pendingMaxSpeed) ? pendingMaxSpeed.value : d.max_speed;
-  if (document.activeElement !== maxSpeedInput) {
-    maxSpeedInput.value = displayMaxSpeed;
-  }
+  if (document.activeElement !== maxSpeedInput) maxSpeedInput.value = displayMaxSpeed;
 
+  // Backend + runtime readouts
   const inferenceBackendVal = document.getElementById('inferenceBackendVal');
   const frozenBackendVal = document.getElementById('frozenBackendVal');
   const inferenceBackendSelect = document.getElementById('inferenceBackendSelect');
+  const learningParadigmVal = document.getElementById('learningParadigmVal');
+  const learningParadigmSelect = document.getElementById('learningParadigmSelect');
+  const learningParadigmApplyBtn = document.getElementById('learningParadigmApplyBtn');
+  const learningParadigmHelper = document.getElementById('learningParadigmHelper');
   const frozenModelInput = document.getElementById('frozenModelInput');
-  inferenceBackendVal.textContent = d.inference_backend === 'frozen'
-    ? 'Frozen model'
-    : 'Online learning model (FCA)';
+  inferenceBackendVal.textContent = d.inference_backend === 'frozen' ? 'Frozen model' : 'Online (FCA)';
+  inferenceBackendVal.classList.toggle('frozen', d.inference_backend === 'frozen');
+  inferenceBackendVal.classList.toggle('online', d.inference_backend !== 'frozen');
   frozenBackendVal.textContent = d.frozen_model_backend || '—';
 
-  const runtimePill = document.getElementById('runtimePill');
-  const runtimeModeVal = document.getElementById('runtimeModeVal');
-  const runtimeTargetVal = document.getElementById('runtimeTargetVal');
+  const runtimeReadout = document.getElementById('runtimeReadout');
+  const runtimeTarget = document.getElementById('runtimeTarget');
   const configuredFrozenPath = d.configured_frozen_model_path || d.frozen_model_path || '';
-
   if (d.inference_backend === 'frozen') {
-    runtimePill.classList.remove('main');
-    runtimePill.classList.add('frozen');
-    runtimeModeVal.textContent = 'FROZEN MODEL';
-    runtimeTargetVal.textContent = `model: ${basename(d.frozen_model_path || configuredFrozenPath) || '—'} (${d.frozen_model_backend || 'runtime unknown'})`;
+    runtimeReadout.textContent = 'FROZEN';
+    runtimeReadout.classList.remove('online'); runtimeReadout.classList.add('frozen');
+    runtimeTarget.textContent = `model: ${basename(d.frozen_model_path || configuredFrozenPath) || '—'} (${d.frozen_model_backend || 'unknown'})`;
   } else {
-    runtimePill.classList.remove('frozen');
-    runtimePill.classList.add('main');
-    runtimeModeVal.textContent = 'ONLINE LEARNING MODEL (FCA)';
-    runtimeTargetVal.textContent = `policy: ${d.active_policy_head || '—'}`;
+    runtimeReadout.textContent = 'ONLINE FCA';
+    runtimeReadout.classList.remove('frozen'); runtimeReadout.classList.add('online');
+    runtimeTarget.textContent = `policy: ${d.active_policy_head || '—'}`;
   }
 
   if (pendingInferenceBackend && d.inference_backend === pendingInferenceBackend.value) {
@@ -923,15 +1005,10 @@ function updateTelemetry(d) {
     setUiActionStatus(`Runtime switched to ${d.inference_backend === 'frozen' ? 'FROZEN' : 'ONLINE'}.`, 'good');
   }
   const displayInferenceBackend = isPendingFresh(pendingInferenceBackend)
-    ? pendingInferenceBackend.value
-    : (d.inference_backend || 'main');
-  if (document.activeElement !== inferenceBackendSelect) {
-    inferenceBackendSelect.value = displayInferenceBackend;
-  }
+    ? pendingInferenceBackend.value : (d.inference_backend || 'main');
+  if (document.activeElement !== inferenceBackendSelect) inferenceBackendSelect.value = displayInferenceBackend;
   if (document.activeElement !== frozenModelInput) {
-    const displayFrozenPath = isPendingFresh(pendingFrozenPath)
-      ? pendingFrozenPath.value
-      : configuredFrozenPath;
+    const displayFrozenPath = isPendingFresh(pendingFrozenPath) ? pendingFrozenPath.value : configuredFrozenPath;
     frozenModelInput.value = displayFrozenPath;
   }
   if (pendingFrozenPath && configuredFrozenPath === pendingFrozenPath.value) {
@@ -939,10 +1016,61 @@ function updateTelemetry(d) {
     setUiActionStatus('Frozen model path updated.', 'good');
   }
   const mainOption = inferenceBackendSelect.querySelector('option[value="main"]');
-  if (mainOption) {
-    mainOption.disabled = !d.main_model_available;
+  if (mainOption) mainOption.disabled = !d.main_model_available;
+
+  const availableLearningParadigms = Array.isArray(d.available_learning_paradigms) ? d.available_learning_paradigms : [];
+  const currentLearningParadigm = d.active_learning_paradigm || '';
+  const currentLearningParadigmLabel = d.active_learning_paradigm_label || currentLearningParadigm || '—';
+  if (learningParadigmVal) learningParadigmVal.textContent = currentLearningParadigmLabel;
+
+  if (learningParadigmSelect) {
+    const currentOptions = Array.from(learningParadigmSelect.options).map(o => o.value);
+    const nextOptions = availableLearningParadigms.map(item => item.id);
+    const needsRebuild = currentOptions.length !== nextOptions.length
+      || currentOptions.some((value, index) => value !== nextOptions[index]);
+    if (needsRebuild) {
+      learningParadigmSelect.innerHTML = '';
+      if (availableLearningParadigms.length === 0) {
+        const o = document.createElement('option');
+        o.value = ''; o.textContent = 'No paradigms available';
+        learningParadigmSelect.appendChild(o);
+      } else {
+        availableLearningParadigms.forEach(item => {
+          const o = document.createElement('option');
+          o.value = item.id;
+          o.textContent = item.label;
+          learningParadigmSelect.appendChild(o);
+        });
+      }
+    }
+    if (document.activeElement !== learningParadigmSelect) {
+      const displayedParadigm = isPendingFresh(pendingLearningParadigm)
+        ? pendingLearningParadigm.value
+        : currentLearningParadigm;
+      if (displayedParadigm && nextOptions.includes(displayedParadigm)) learningParadigmSelect.value = displayedParadigm;
+      else if (nextOptions.length > 0) learningParadigmSelect.value = nextOptions[0];
+      else learningParadigmSelect.value = '';
+    }
+    if (pendingLearningParadigm && currentLearningParadigm === pendingLearningParadigm.value) {
+      pendingLearningParadigm = null;
+      setUiActionStatus(`Learning paradigm loaded: ${currentLearningParadigmLabel}.`, 'good');
+    }
+
+    const deepParadigmEnabled = !!d.main_model_available && d.adapter_type === 'deep' && d.inference_backend === 'main';
+    learningParadigmSelect.disabled = !deepParadigmEnabled;
+    learningParadigmApplyBtn.disabled = !deepParadigmEnabled;
+
+    let paradigmHint = 'Switch to ONLINE (FCA) to change deep learning paradigms.';
+    if (!d.main_model_available) paradigmHint = 'Learning paradigms require an online model.';
+    else if (d.adapter_type !== 'deep') paradigmHint = 'Learning paradigms are only available for --adapter deep.';
+    else if (d.inference_backend === 'main') {
+      const selectedParadigm = availableLearningParadigms.find(item => item.id === currentLearningParadigm);
+      paradigmHint = selectedParadigm ? selectedParadigm.description : 'Choose the online learning paradigm.';
+    }
+    if (learningParadigmHelper) learningParadigmHelper.textContent = paradigmHint;
   }
 
+  // Policy heads
   const policyHeadVal = document.getElementById('policyHeadVal');
   const policyHeadSelect = document.getElementById('policyHeadSelect');
   const policyHeadApplyBtn = document.getElementById('policyHeadApplyBtn');
@@ -951,82 +1079,63 @@ function updateTelemetry(d) {
   policyHeadVal.textContent = currentPolicyHead || '—';
 
   if (policyHeadSelect) {
-    const currentOptions = Array.from(policyHeadSelect.options).map(option => option.value);
+    const currentOptions = Array.from(policyHeadSelect.options).map(o => o.value);
     const needsRebuild = currentOptions.length !== availablePolicyHeads.length
-      || currentOptions.some((value, index) => value !== availablePolicyHeads[index]);
-
+      || currentOptions.some((v, i) => v !== availablePolicyHeads[i]);
     if (needsRebuild) {
       policyHeadSelect.innerHTML = '';
       if (availablePolicyHeads.length === 0) {
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = 'No .pt heads found';
-        policyHeadSelect.appendChild(option);
+        const o = document.createElement('option');
+        o.value = ''; o.textContent = 'No .pt heads found';
+        policyHeadSelect.appendChild(o);
       } else {
-        availablePolicyHeads.forEach((name) => {
-          const option = document.createElement('option');
-          option.value = name;
-          option.textContent = name;
-          policyHeadSelect.appendChild(option);
+        availablePolicyHeads.forEach(name => {
+          const o = document.createElement('option');
+          o.value = name; o.textContent = name;
+          policyHeadSelect.appendChild(o);
         });
       }
     }
-
     if (document.activeElement !== policyHeadSelect) {
-      const displayedPolicyHead = isPendingFresh(pendingPolicyHead)
-        ? pendingPolicyHead.value
-        : currentPolicyHead;
-      if (displayedPolicyHead && availablePolicyHeads.includes(displayedPolicyHead)) {
-        policyHeadSelect.value = displayedPolicyHead;
-      } else if (availablePolicyHeads.length > 0) {
-        policyHeadSelect.value = availablePolicyHeads[0];
-      } else {
-        policyHeadSelect.value = '';
-      }
+      const displayed = isPendingFresh(pendingPolicyHead) ? pendingPolicyHead.value : currentPolicyHead;
+      if (displayed && availablePolicyHeads.includes(displayed)) policyHeadSelect.value = displayed;
+      else if (availablePolicyHeads.length > 0) policyHeadSelect.value = availablePolicyHeads[0];
+      else policyHeadSelect.value = '';
     }
-
     if (pendingPolicyHead && currentPolicyHead === pendingPolicyHead.value) {
       pendingPolicyHead = null;
       setUiActionStatus(`Policy head loaded: ${currentPolicyHead}.`, 'good');
     }
-
-    const policyHeadEnabled = !!d.main_model_available && availablePolicyHeads.length > 0;
-    policyHeadSelect.disabled = !policyHeadEnabled;
-    policyHeadApplyBtn.disabled = !policyHeadEnabled;
-    policyHeadSelect.title = d.main_model_available
-      ? ''
-      : 'Policy head switching requires an online model.';
+    const enabled = !!d.main_model_available && availablePolicyHeads.length > 0;
+    policyHeadSelect.disabled = !enabled;
+    policyHeadApplyBtn.disabled = !enabled;
+    policyHeadSelect.title = d.main_model_available ? '' : 'Policy head switching requires an online model.';
   }
 
   const teachBtn = document.getElementById('btn-TEACH');
   if (teachBtn) {
     teachBtn.disabled = !d.main_model_available;
-    teachBtn.title = d.main_model_available
-      ? ''
-      : 'TEACH requires an online model. Restart with --adapter deep or --adapter scalar.';
-    teachBtn.style.opacity = d.main_model_available ? '1' : '0.45';
-    teachBtn.style.cursor = d.main_model_available ? 'pointer' : 'not-allowed';
+    teachBtn.title = d.main_model_available ? '' : 'TEACH requires an online model.';
+    teachBtn.style.opacity = d.main_model_available ? '1' : '0.4';
   }
 
   const teachWarningNote = document.getElementById('teachWarningNote');
   if (teachWarningNote) {
     let warning = '';
     if (!d.main_model_available) {
-      warning = 'TEACH is unavailable in this run because no online model was loaded. Start with MAIN online mode enabled if you want TEACH updates.';
+      warning = 'TEACH is unavailable: no online model loaded. Restart with --adapter deep or --adapter scalar.';
     } else if (d.inference_backend === 'frozen') {
-      warning = 'FROZEN MODEL is active. Entering TEACH will update the online model checkpoint, not the frozen model currently driving AUTOPILOT.';
+      warning = 'FROZEN active. TEACH will update the online checkpoint, not the frozen model.';
     }
-
     teachWarningNote.textContent = warning;
     teachWarningNote.classList.toggle('show', Boolean(warning));
     teachWarningNote.classList.toggle('warn', Boolean(warning));
   }
 
-  // Checkpoint status
+  // Checkpoint
   const saveEl = document.getElementById('checkpointSaveVal');
   const pathEl = document.getElementById('checkpointPathVal');
   pathEl.textContent = d.checkpoint_path || '—';
-
   if (d.last_manual_checkpoint_saved_at) {
     const savedAt = new Date(d.last_manual_checkpoint_saved_at * 1000);
     let label = savedAt.toLocaleTimeString();
@@ -1040,45 +1149,38 @@ function updateTelemetry(d) {
 }
 
 function setBar(id, valNorm) {
-  // valNorm in [0, 1], 0.5 = centre. Convert to bar position.
   const el = document.getElementById(id);
   if (!el) return;
-  const offsetFromCentre = (valNorm - 0.5);          // [-0.5, 0.5]
-  const widthPct = Math.abs(offsetFromCentre) * 100; // [0, 50]%
+  const offset = valNorm - 0.5;
+  const widthPct = Math.abs(offset) * 100;
   el.style.width = widthPct + '%';
-  el.style.left = offsetFromCentre >= 0 ? '50%' : (50 - widthPct) + '%';
+  el.style.left = offset >= 0 ? '50%' : (50 - widthPct) + '%';
 }
 
-// ─── Commands ───────────────────────────────────────────────────────────
+// Commands
 function send(msg) {
-  if (ws && ws.readyState === 1) {
-    ws.send(JSON.stringify(msg));
-    return true;
-  }
-  setUiActionStatus('Not connected to server. Command was not sent.', 'warn');
+  if (ws && ws.readyState === 1) { ws.send(JSON.stringify(msg)); return true; }
+  setUiActionStatus('Not connected. Command not sent.', 'warn');
   return false;
 }
 
 function setMode(mode) {
   if (mode === 'TEACH') {
-    const telemetry = latestTelemetry || {};
-    if (!telemetry.main_model_available) {
-      alert('TEACH is unavailable because no online model was loaded in this run. Restart with --adapter deep or --adapter scalar.');
+    const t = latestTelemetry || {};
+    if (!t.main_model_available) {
+      alert('TEACH unavailable: no online model loaded. Restart with --adapter deep or --adapter scalar.');
       return;
     }
-    if (telemetry.inference_backend === 'frozen') {
-      const proceed = confirm(
-        'FROZEN MODEL is active. TEACH will update the online model checkpoint, not the frozen model. Continue into TEACH mode?'
-      );
-      if (!proceed) return;
+    if (t.inference_backend === 'frozen') {
+      if (!confirm('FROZEN is active. TEACH will update the online checkpoint, not the frozen model. Continue?')) return;
     }
   }
-
   send({ type: 'mode', value: mode });
 }
 function setSession(label)     { send({ type: 'session', value: label }); }
 function rewindAutopilot()     { send({ type: 'rewind' }); }
 function saveCheckpoint()      { send({ type: 'save_checkpoint' }); }
+
 function applyMaxSpeed() {
   const input = document.getElementById('maxSpeedInput');
   const raw = parseInt(input.value, 10);
@@ -1086,46 +1188,55 @@ function applyMaxSpeed() {
   const value = Math.max(0, Math.min(100, raw));
   input.value = value;
   pendingMaxSpeed = { value, atMs: Date.now() };
-  markActionPending(`Applying max speed ${value}...`);
-  if (!send({ type: 'set_max_speed', value })) {
-    pendingMaxSpeed = null;
-  }
+  markActionPending(`Applying max speed ${value}…`);
+  if (!send({ type: 'set_max_speed', value })) pendingMaxSpeed = null;
 }
+
+function toggleAutopilotFrameLogging() {
+  const current = !!(latestTelemetry && latestTelemetry.autopilot_frame_logging);
+  const value = !current;
+  pendingAutopilotFrameLogging = { value, atMs: Date.now() };
+  markActionPending(`${value ? 'Enabling' : 'Disabling'} AUTOPILOT frame logging…`);
+  if (!send({ type: 'set_autopilot_frame_logging', value })) pendingAutopilotFrameLogging = null;
+}
+
 function applyInferenceBackend() {
   const backend = document.getElementById('inferenceBackendSelect').value;
   const modelPath = document.getElementById('frozenModelInput').value.trim();
   pendingInferenceBackend = { value: backend, atMs: Date.now() };
-  markActionPending(`Switching runtime to ${backend.toUpperCase()}...`);
-  if (!send({ type: 'set_inference_backend', backend, model_path: modelPath })) {
-    pendingInferenceBackend = null;
-  }
+  markActionPending(`Switching runtime to ${backend.toUpperCase()}…`);
+  if (!send({ type: 'set_inference_backend', backend, model_path: modelPath })) pendingInferenceBackend = null;
+}
+
+function applyLearningParadigm() {
+  const select = document.getElementById('learningParadigmSelect');
+  const value = select ? select.value : '';
+  if (!value) return;
+  pendingLearningParadigm = { value, atMs: Date.now() };
+  markActionPending(`Switching learning paradigm to ${select.options[select.selectedIndex]?.textContent || value}…`);
+  if (!send({ type: 'set_learning_paradigm', value })) pendingLearningParadigm = null;
 }
 
 function applyFrozenModelPath() {
-  const frozenModelInput = document.getElementById('frozenModelInput');
-  const modelPath = frozenModelInput ? frozenModelInput.value.trim() : '';
+  const modelPath = document.getElementById('frozenModelInput').value.trim();
   if (!modelPath) return;
   pendingFrozenPath = { value: modelPath, atMs: Date.now() };
-  markActionPending('Updating frozen model path...');
-  if (!send({ type: 'set_frozen_model_path', model_path: modelPath })) {
-    pendingFrozenPath = null;
-  }
+  markActionPending('Updating frozen model path…');
+  if (!send({ type: 'set_frozen_model_path', model_path: modelPath })) pendingFrozenPath = null;
 }
 
 function applyPolicyHead() {
-  const select = document.getElementById('policyHeadSelect');
-  const value = select ? select.value : '';
-  if (!value) return;
-  pendingPolicyHead = { value, atMs: Date.now() };
-  markActionPending(`Loading policy head ${value}...`);
-  if (!send({ type: 'set_policy_head', value })) {
-    pendingPolicyHead = null;
-  }
+  const v = document.getElementById('policyHeadSelect').value;
+  if (!v) return;
+  pendingPolicyHead = { value: v, atMs: Date.now() };
+  markActionPending(`Loading policy head ${v}…`);
+  if (!send({ type: 'set_policy_head', value: v })) pendingPolicyHead = null;
 }
+
 function resetAdapter() {
-  if (confirm('Reset adapter weights to zero? Replay buffer will be kept.'))
-    send({ type: 'reset_adapter' });
+  if (confirm('Reset adapter weights to zero? Replay buffer kept.')) send({ type: 'reset_adapter' });
 }
+
 function datasetStop()             { send({ type: 'dataset_stop' }); }
 function datasetResume()           { send({ type: 'dataset_resume' }); }
 function datasetCaptureStopFrame() { send({ type: 'dataset_capture_stop_frame' }); }
@@ -1137,27 +1248,17 @@ function markEvent() {
 
 document.getElementById('maxSpeedInput').addEventListener('change', applyMaxSpeed);
 document.getElementById('maxSpeedInput').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    applyMaxSpeed();
-  }
+  if (e.key === 'Enter') { e.preventDefault(); applyMaxSpeed(); }
 });
-
 document.getElementById('frozenModelInput').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    applyFrozenModelPath();
-  }
+  if (e.key === 'Enter') { e.preventDefault(); applyFrozenModelPath(); }
 });
-
 document.getElementById('frozenModelInput').addEventListener('change', applyFrozenModelPath);
 
-// ─── Keyboard handlers ──────────────────────────────────────────────────
 document.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
   if (e.repeat && !['a','A','d','D'].includes(e.key)) return;
 
-  // Always-on
   if (e.key === ' ')          { setMode('PAUSED'); e.preventDefault(); return; }
   if (e.key === '1')          { setMode('PAUSED'); return; }
   if (e.key === '2')          { setMode('AUTOPILOT'); return; }
@@ -1182,18 +1283,14 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'w' || e.key === 'W') {
       if (e.shiftKey) send({ type: 'long_forward_step' });
       else            send({ type: 'forward_step' });
-      e.preventDefault();
-      return;
+      e.preventDefault(); return;
     }
     if (e.key === 'x' || e.key === 'X') { send({ type: 'stop_teach' });  return; }
     if (e.key === 'b' || e.key === 'B') {
-      if (!backwardHoldActive) {
-        send({ type: 'backward_hold_start' });
-        backwardHoldActive = true;
-      }
+      if (!backwardHoldActive) { send({ type: 'backward_hold_start' }); backwardHoldActive = true; }
       return;
     }
-    if (e.key === 'r' || e.key === 'R') { setMode('AUTOPILOT');          return; }
+    if (e.key === 'r' || e.key === 'R') { setMode('AUTOPILOT'); return; }
   }
 
   if (currentMode === 'DATASET_COLLECTION') {
@@ -1207,19 +1304,15 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'd' || e.key === 'D') { send({ type: 'steer_right' }); return; }
     if (e.key === 's' || e.key === 'S') { send({ type: 'centre' });      return; }
     if (e.key === 'b' || e.key === 'B') {
-      if (!backwardHoldActive) {
-        send({ type: 'backward_hold_start' });
-        backwardHoldActive = true;
-      }
+      if (!backwardHoldActive) { send({ type: 'backward_hold_start' }); backwardHoldActive = true; }
       return;
     }
-    if (e.key === 'r' || e.key === 'R') { setMode('AUTOPILOT');          return; }
+    if (e.key === 'r' || e.key === 'R') { setMode('AUTOPILOT'); return; }
   }
 });
 
 document.addEventListener('keyup', (e) => {
   if (e.target.tagName === 'INPUT') return;
-
   if ((e.key === 'b' || e.key === 'B') && backwardHoldActive) {
     send({ type: 'backward_hold_stop' });
     backwardHoldActive = false;

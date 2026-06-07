@@ -1,0 +1,70 @@
+[
+  {
+    "name": "efficientnet_lite0_dense512",
+    "model_path": "",
+    "architecture": "EfficientNet-Lite0",
+    "input_size": [
+      224,
+      224,
+      3
+    ],
+    "feature_dim": 512,
+    "quantization": "float32",
+    "runtime": "CPU",
+    "preprocessing": "crop_top_80_resize_224_scale_minus1_1_float",
+    "date_trained": "",
+    "training_data": "future probe candidate",
+    "notes": "Placeholder registry entry."
+  },
+  {
+    "name": "mobilenetv2_dense512_balanced",
+    "model_path": "",
+    "architecture": "MobileNetV2",
+    "input_size": [
+      224,
+      224,
+      3
+    ],
+    "feature_dim": 512,
+    "quantization": "int8",
+    "runtime": "EdgeTPU",
+    "preprocessing": "crop_top_80_resize_224_scale_minus1_1_quantized",
+    "date_trained": "",
+    "training_data": "balanced left/right dataset",
+    "notes": "Fill in when the balanced extractor is trained."
+  },
+  {
+    "name": "mobilenetv2_dense512_current",
+    "model_path": "tflite_models/feature_extractor_dense512_int8.tflite",
+    "architecture": "MobileNetV2",
+    "input_size": [
+      224,
+      224,
+      3
+    ],
+    "feature_dim": 512,
+    "quantization": "int8",
+    "runtime": "CPU",
+    "preprocessing": "crop_top_80_resize_224_scale_minus1_1_quantized",
+    "date_trained": "",
+    "training_data": "original car dataset, left-biased",
+    "notes": ""
+  },
+  {
+    "name": "mobilenetv3small_dense512",
+    "model_path": "",
+    "architecture": "MobileNetV3Small",
+    "input_size": [
+      224,
+      224,
+      3
+    ],
+    "feature_dim": 512,
+    "quantization": "float32",
+    "runtime": "CPU",
+    "preprocessing": "crop_top_80_resize_224_scale_minus1_1_float",
+    "date_trained": "",
+    "training_data": "future probe candidate",
+    "notes": "Placeholder registry entry."
+  }
+]

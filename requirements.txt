@@ -28,3 +28,11 @@ flask-sock
 
 # Numerics
 numpy
+scikit-learn
+pandas
+
+# studio
+
+streamlit
+matplotlib
+umap-learn

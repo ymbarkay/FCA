@@ -106,6 +106,15 @@ def parse_args():
     )
 
     p.add_argument(
+        "--learning-paradigm",
+        default="moe_v4_intent_routing",
+        help=(
+            "Online deep learning paradigm loaded from fca/learning/paradigms/. "
+            "Only used when --adapter deep is selected."
+        ),
+    )
+
+    p.add_argument(
         "--no-tpu",
         action="store_true",
         help="Force CPU TFLite even if Edge TPU delegate is available",
@@ -268,6 +277,7 @@ def print_config(args):
     print(f"  Mode:           {args.mode}")
     print(f"  Base model:     {args.base_model}")
     print(f"  Feature model:  {args.feature_model}")
+    print(f"  Paradigm:       {args.learning_paradigm}")
     print(f"  CPU fallback:   {args.cpu_base_model}")
     print(f"  Edge TPU:       {'disabled' if args.no_tpu else 'enabled'}")
     print(f"  TFLite threads: {args.tflite_threads}")
@@ -311,6 +321,7 @@ def main():
             cpu_base_model_path=args.cpu_base_model,
             num_threads=args.tflite_threads,
             feature_model_path=args.feature_model,
+            learning_paradigm=args.learning_paradigm,
         )
 
     except FileNotFoundError as e:

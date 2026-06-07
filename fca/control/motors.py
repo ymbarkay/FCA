@@ -24,7 +24,9 @@ class Motors:
         self.dry_run = dry_run or (front_wheels is None or back_wheels is None)
 
         self._last_direction = None
-        self._last_angle = 90
+        self._last_angle = None
+        self._last_speed = 0
+        self._motors_stopped = True
 
         if self.dry_run:
             print("[motors] DRY RUN — no actual motor commands will be sent")
@@ -51,6 +53,10 @@ class Motors:
     def steer(self, angle_car):
         """Turn only the front wheels. Does not move the car."""
         angle_clamped = self._clamp_angle(angle_car)
+
+        if angle_clamped == self._last_angle:
+            return
+
         self._last_angle = angle_clamped
 
         if not self.dry_run:
@@ -72,6 +78,9 @@ class Motors:
 
         speed_int = min(speed_int, self.max_speed)
 
+        if direction == self._last_direction and speed_int == self._last_speed:
+            return
+
         if not self.dry_run:
             if direction != self._last_direction:
                 if direction == "forward":
@@ -80,7 +89,12 @@ class Motors:
                     self.back_wheels.backward()
                 self._last_direction = direction
 
-            self.back_wheels.speed = speed_int
+            if speed_int != self._last_speed:
+                self.back_wheels.speed = speed_int
+
+        self._last_direction = direction
+        self._last_speed = speed_int
+        self._motors_stopped = False
 
     def set_max_speed(self, max_speed):
         max_speed = int(max(0, min(100, int(max_speed))))
@@ -103,6 +117,9 @@ class Motors:
                 pass
 
     def _stop_motors(self):
+        if self._motors_stopped:
+            return
+
         if not self.dry_run:
             try:
                 self.back_wheels.speed = 0
@@ -111,3 +128,5 @@ class Motors:
                 pass
 
         self._last_direction = None
+        self._last_speed = 0
+        self._motors_stopped = True

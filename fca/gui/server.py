@@ -13,7 +13,6 @@ import time
 
 from flask import Flask, Response, render_template
 from flask_sock import Sock
-
 from fca.core.state import (
     MODE_AUTOPILOT,
     MODE_TEACH,
@@ -38,21 +37,28 @@ def create_app(state, controller, driving_loop, teach_controller, replay_buffer)
     def generate_mjpeg():
         last_frame_id = None
 
-        while not state.shutdown:
+        with state.lock:
+            state.video_client_count += 1
+
+        try:
+            while not state.shutdown:
+                with state.lock:
+                    frame = state.latest_frame_jpeg
+                    frame_id = state.frames_processed
+
+                if frame is not None and frame_id != last_frame_id:
+                    last_frame_id = frame_id
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n\r\n"
+                        + frame
+                        + b"\r\n"
+                    )
+
+                time.sleep(0.033)
+        finally:
             with state.lock:
-                frame = state.latest_frame_jpeg
-                frame_id = state.frames_processed
-
-            if frame is not None and frame_id != last_frame_id:
-                last_frame_id = frame_id
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n"
-                    + frame
-                    + b"\r\n"
-                )
-
-            time.sleep(0.033)
+                state.video_client_count = max(0, state.video_client_count - 1)
 
     @app.route("/video_feed")
     def video_feed():
@@ -259,6 +265,15 @@ def _handle_command(msg, state, controller, driving_loop, teach_controller, repl
             state.max_speed = max_speed
         print(f"[server] max speed -> {max_speed}")
 
+    elif t == "set_autopilot_frame_logging":
+        enabled = bool(msg.get("value", False))
+        if hasattr(driving_loop, "set_autopilot_frame_logging"):
+            driving_loop.set_autopilot_frame_logging(enabled)
+        else:
+            with state.lock:
+                state.autopilot_frame_logging = enabled
+        print(f"[server] autopilot frame logging -> {enabled}")
+
     elif t == "set_inference_backend":
         backend = msg.get("backend", "")
         model_path = msg.get("model_path", "")
@@ -289,6 +304,16 @@ def _handle_command(msg, state, controller, driving_loop, teach_controller, repl
             return
 
         print(f"[server] policy head -> {value}")
+
+    elif t == "set_learning_paradigm":
+        value = msg.get("value", "")
+        try:
+            controller.switch_learning_paradigm(value)
+        except Exception as e:
+            print(f"[server] set_learning_paradigm failed: {e}")
+            return
+
+        print(f"[server] learning paradigm -> {value}")
 
     # ── Adapter management ────────────────────────────────────────────────
     elif t == "reset_adapter":
